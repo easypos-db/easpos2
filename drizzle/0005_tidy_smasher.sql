@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `adjustments` text DEFAULT '[]' NOT NULL;

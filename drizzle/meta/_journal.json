@@ -1,0 +1,69 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794216468122,
+      "tag": "0000_hesitant_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794232543255,
+      "tag": "0001_thankful_nomad",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794233539920,
+      "tag": "0002_ambitious_domino",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794233841817,
+      "tag": "0003_brave_miss_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794234799867,
+      "tag": "0004_mixed_mordo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794237390934,
+      "tag": "0005_tidy_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794240022550,
+      "tag": "0006_premium_mystique",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794241586977,
+      "tag": "0007_petite_shen",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794266001990,
+      "tag": "0008_early_magus",
+      "breakpoints": true
+    }
+  ]
+}
