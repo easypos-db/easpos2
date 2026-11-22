@@ -1,6 +1,6 @@
 (function () {
-  if (window.__easyAddonsLoaded) return;
-  window.__easyAddonsLoaded = true;
+  if (window.__easyAddonsLoadedV2) return;
+  window.__easyAddonsLoadedV2 = true;
 
   function roundTL(tl, mode) {
     if (mode === "1") return Math.round(tl);
@@ -297,5 +297,8 @@ cd "/Users/melih/Downloads/easypos" && cat << 'EOF' > public/addons.js
       } catch (err) { alert(err.message || "Hata"); e.target.disabled = false; }
     }
   });
-  setInterval(injectUI, 400);
+  injectUI();
+  const appRoot = document.getElementById("app");
+  if (appRoot) new MutationObserver(() => injectUI()).observe(appRoot, { childList: true, subtree: true });
+  setInterval(injectUI, 1200);
 })();
