@@ -101,7 +101,7 @@ async function handleCore(request:Request,db:any,env?:any){try{
  if(method==='POST'&&path==='/api/costs')return await handleCosts(request,db,me,admin);
  if(method!=='POST')return json({error:'İşlem bulunamadı.'},404);
  const raw=await request.text();if(raw.length>16000)err('İstek çok büyük.',413);let b;try{b=JSON.parse(raw)}catch{err('Geçersiz JSON.')}
- if(path==='/api/team'){
+ if(path==='/api/team'||(path==='/api/members'&&b.action==='add_waiter')){
   if(!admin)err('Yönetici yetkisi gerekiyor.',403);
   if(b.action==='set_manager_pin')return await saveManagerPin(db,b.pin,me.id);
    if(b.action==='set_admin_login'){
@@ -121,8 +121,8 @@ async function handleCore(request:Request,db:any,env?:any){try{
    await db.prepare('INSERT INTO courier_roster (id,name,username,active) VALUES (?,?,?,1)').bind(crypto.randomUUID(),name,username).run();return json({ok:true});
   }
   if(b.action==='add_waiter'){
-   const name=String(b.name||'').trim().slice(0,70), username=String(b.username||'').trim().toLowerCase().slice(0,40), pin=String(b.pin||'').trim();
-   if(!name||!username||!/^[0-9]{6}$/.test(pin))err('Ad, kullanıcı adı ve 6 haneli rakam PIN gerekli.');
+   const name=String(b.name||'').trim().slice(0,70), username=String(b.username||'').trim().toLowerCase(), pin=String(b.pin||'').trim();
+   if(!name||name.length>70||!/^[a-z0-9_]{3,30}$/.test(username)||!/^[0-9]{6}$/.test(pin))err('Ad, 3–30 karakterlik kullanıcı adı ve 6 haneli rakam PIN gerekli.');
    const dup=await db.prepare('SELECT 1 FROM admin_login WHERE username=? UNION ALL SELECT 1 FROM courier_roster WHERE username=?').bind(username,username).first();
    if(dup)err('Bu kullanıcı adı zaten kayıtlı.',409);
    const wid='waiter_'+crypto.randomUUID().slice(0,8), salt=crypto.randomUUID(), hash=await pinHash(pin,salt), now=Date.now();

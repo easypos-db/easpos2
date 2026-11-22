@@ -36,7 +36,18 @@
         const waiterSec = document.createElement("div");
         waiterSec.id = "waiterSectionCard";
         waiterSec.className = "section";
-        waiterSec.innerHTML = '<h3>Garson ekle</h3><p class="fine">Garsonlar kendi kullanıcı adı ve 6 haneli PIN kodu ile giriş yapıp yalnızca Masa Sipariş ve Gel Al ekranlarını kullanabilir.</p><div class="grid two"><label><span>Ad soyad</span><input id="wName" placeholder="Örn: Ahmet"></label><label><span>Kullanıcı adı</span><input id="wUser" placeholder="Örn: ahmet"></label></div><div class="grid two" style="margin-top:8px"><label><span>6 Haneli PIN</span><input id="wPin" type="password" inputmode="numeric" maxlength="6" placeholder="6 rakam (Örn: 123456)"></label><div style="display:flex;align-items:flex-end"><button type="button" class="primary" id="wAddBtn">Garson ekle</button></div></div>';
+        waiterSec.innerHTML = `
+          <h3>Garson ekle</h3>
+          <p class="fine">Garsonlar kullanıcı adı ve 6 haneli PIN ile giriş yapar. Ekip listesinden hesabı pasife alabilir veya yeniden etkinleştirebilirsin.</p>
+          <form id="waiterForm">
+            <div class="form-grid">
+              <label>Ad soyad<input id="wName" name="name" maxlength="70" required placeholder="Garson adı"></label>
+              <label>Kullanıcı adı<input id="wUser" name="username" pattern="[a-z0-9_]{3,30}" maxlength="30" required placeholder="kullanici_adi"></label>
+              <label>6 haneli PIN<input id="wPin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" required autocomplete="new-password" placeholder="6 rakam"></label>
+            </div>
+            <div class="form-actions"><button type="button" class="primary" id="wAddBtn">Garson ekle</button></div>
+          </form>
+        `;
         courierSec.parentNode.insertBefore(waiterSec, courierSec);
       }
     }
@@ -100,7 +111,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Eklenemedi");
         if (typeof toast === "function") toast("Garson hesabı oluşturuldu.");
-        if (typeof sync === "function") await sync(true); else location.reload();
+        if (typeof loadTeam === "function") await loadTeam(); else if (typeof sync === "function") await sync(true); else location.reload();
       } catch (err) { alert(err.message || "Hata"); e.target.disabled = false; }
     }
   });
