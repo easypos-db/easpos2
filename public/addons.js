@@ -192,8 +192,8 @@
       state.forEach((x) => {
 cd "/Users/melih/Downloads/easypos" && cat << 'EOF' > public/addons.js
 (function () {
-  if (window.__easyAddonsLoaded) return;
-  window.__easyAddonsLoaded = true;
+  if (window.__easyAddonsLoadedV2) return;
+  window.__easyAddonsLoadedV2 = true;
   function roundTL(tl, mode) {
     if (mode === "1") return Math.round(tl);
     if (mode === "5") return Math.round(tl / 5) * 5;
