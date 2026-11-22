@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./dist/client"
 binding = "ASSETS"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "easypos-db"
-database_id = "237e5b65-9287-4c00-80a7-1051c976fe56" # replace before wrangler deploy
+#[[d1_databases]]
+#binding = "DB"
+#database_name = "easypos-db"
+#database_id = "237e5b65-9287-4c00-80a7-1051c976fe56" # replace before wrangler deploy
