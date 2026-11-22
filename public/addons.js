@@ -1,6 +1,6 @@
 (function () {
-  if (window.__easyAddonsLoadedV2) return;
-  window.__easyAddonsLoadedV2 = true;
+  if (window.__easyAddonsLoaded) return;
+  window.__easyAddonsLoaded = true;
 
   function roundTL(tl, mode) {
     if (mode === "1") return Math.round(tl);
@@ -192,8 +192,8 @@
       state.forEach((x) => {
 cd "/Users/melih/Downloads/easypos" && cat << 'EOF' > public/addons.js
 (function () {
-  if (window.__easyAddonsLoadedV2) return;
-  window.__easyAddonsLoadedV2 = true;
+  if (window.__easyAddonsLoaded) return;
+  window.__easyAddonsLoaded = true;
   function roundTL(tl, mode) {
     if (mode === "1") return Math.round(tl);
     if (mode === "5") return Math.round(tl / 5) * 5;
@@ -297,8 +297,5 @@ cd "/Users/melih/Downloads/easypos" && cat << 'EOF' > public/addons.js
       } catch (err) { alert(err.message || "Hata"); e.target.disabled = false; }
     }
   });
-  injectUI();
-  const appRoot = document.getElementById("app");
-  if (appRoot) new MutationObserver(() => injectUI()).observe(appRoot, { childList: true, subtree: true });
-  setInterval(injectUI, 1200);
+  setInterval(injectUI, 400);
 })();
