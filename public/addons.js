@@ -117,3 +117,41 @@
   });
   setInterval(injectUI, 400);
 })();
+
+;(function(){
+  const st = document.createElement("style");
+  st.textContent = `
+    .printer-side-card, .printer-side-card > div {
+      background: #ffffff !important;
+      color: #0f172a !important;
+      border: 1px solid #cbd5e1 !important;
+      backdrop-filter: none !important;
+      box-shadow: 0 4px 14px rgba(15,23,42,.08) !important;
+    }
+    .printer-side-card *, .printer-side-card h3, .printer-side-card p, .printer-side-card small, .printer-side-card label, .printer-side-card span {
+      color: #0f172a !important;
+      opacity: 1 !important;
+    }
+    .printer-side-card a, .printer-side-card button.primary {
+      color: #ffffff !important;
+    }
+    .printer-side-card a[href*="print-bridge"] {
+      color: #c2410c !important;
+      font-weight: 700 !important;
+    }
+  `;
+  document.head.appendChild(st);
+
+  setInterval(() => {
+    const link = document.querySelector('a[href="/print-bridge.js"]');
+    if (link && !document.getElementById("winBridgeDl")) {
+      const winBtn = document.createElement("a");
+      winBtn.id = "winBridgeDl";
+      winBtn.href = "/print-bridge-windows.bat";
+      winBtn.download = "print-bridge-windows.bat";
+      winBtn.textContent = " • Windows Başlatıcı İndir (.bat)";
+      winBtn.style.cssText = "color:#0f172a!important;font-weight:700;text-decoration:underline;margin-left:6px";
+      link.parentNode.insertBefore(winBtn, link.nextSibling);
+    }
+  }, 500);
+})();
