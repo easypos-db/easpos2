@@ -69,6 +69,22 @@ async function handleCore(request:Request,db:any,env?:any){try{
  if(!me&&uid&&email){let invited=await db.prepare('SELECT * FROM members WHERE email=? AND user_id IS NULL AND active=1').bind(email).first();if(invited){await db.prepare('UPDATE members SET user_id=? WHERE id=? AND user_id IS NULL AND active=1').bind(uid,invited.id).run();me=await db.prepare('SELECT * FROM members WHERE user_id=?').bind(uid).first()}}
  if(!me&&(!uid||!email))return json({error:'Kullanıcı adı ve PIN ile giriş yap.',signIn:'/signin-with-chatgpt?return_to=%2F'},401);
  if(!me||!me.active)return json({error:'Bu hesap için aktif çalışan yetkisi bulunmuyor. Yöneticinden e-posta adresini eklemesini iste.'},403);
+ if(me.role==='kitchen'){
+  if(method!=='GET'||path!=='/api/state')err('Mutfak hesabı yalnızca siparişleri görüntüleyebilir.',403);
+  const rows=(await db.prepare("SELECT * FROM orders WHERE demo=0 AND merged_into IS NULL AND ((service_type='table' AND stage<4) OR (service_type IN ('package','pickup') AND stage<2)) ORDER BY created,id").all()).results||[];
+  const orders=rows.map((row:any)=>{
+   const order=orderRow(row);
+   const {id,brand,platform,serviceType,tableNo,stage,version,created,note,productNotes,adjustments}=order;
+   const items=order.items.map((item:string)=>{
+    const line=parseOrderItem(item);
+    return line?formatOrderItem(line.quantity,line.name,0):item;
+   });
+   return {id,brand,platform,serviceType,tableNo,stage,version,created,note,productNotes,items,
+    adjustments:adjustments.filter((entry:any)=>['cancelled','refunded','kitchen_ready'].includes(entry.status))
+     .map(({index,status,quantity}:any)=>({index,status,quantity}))};
+  });
+  return json({me:{id:me.id,name:me.name,role:me.role},people:[],orders,day:day(),nativeIdentity:!!uid});
+ }
  const admin=me.role==='admin';const waiter=me.role==='waiter';const canSell=admin||waiter;
  if(admin){await db.batch(roster.map(p=>db.prepare('INSERT OR IGNORE INTO courier_roster (id,name,username,active) VALUES (?,?,?,1)').bind(p.id,p.name,p.username)));await db.prepare('CREATE TABLE IF NOT EXISTS product_prices (product_id TEXT PRIMARY KEY, ys_price INTEGER NOT NULL, updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL)').run();await db.prepare('CREATE TABLE IF NOT EXISTS price_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id TEXT NOT NULL, old_price INTEGER NOT NULL, new_price INTEGER NOT NULL, actor TEXT NOT NULL, created INTEGER NOT NULL)').run();await db.prepare('CREATE TABLE IF NOT EXISTS admin_login (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, pin_hash TEXT NOT NULL, pin_salt TEXT NOT NULL, updated_at INTEGER NOT NULL)').run();await ensureMenuSchema(db);}
  if(admin&&method==='GET'&&path==='/api/printers')return json({printers:(await db.prepare('SELECT * FROM printer_devices WHERE active=1 ORDER BY name').all()).results||[],discovered:(await db.prepare('SELECT name FROM printer_discovery WHERE last_seen>? ORDER BY name').bind(Date.now()-120000).all()).results?.map((x:any)=>x.name)||[],bridgeReady:!!(await db.prepare('SELECT id FROM print_bridge_tokens WHERE revoked=0 LIMIT 1').first()),printQueue:(await db.prepare("SELECT status,COUNT(*) AS count FROM print_queue WHERE status IN ('pending','processing','failed') GROUP BY status").all()).results||[],webhooks:(await db.prepare('SELECT platform,updated_at FROM webhook_tokens ORDER BY platform').all()).results||[]});
@@ -103,6 +119,22 @@ async function handleCore(request:Request,db:any,env?:any){try{
  const raw=await request.text();if(raw.length>16000)err('İstek çok büyük.',413);let b;try{b=JSON.parse(raw)}catch{err('Geçersiz JSON.')}
  if(path==='/api/team'||(path==='/api/members'&&b.action==='add_waiter')){
   if(!admin)err('Yönetici yetkisi gerekiyor.',403);
+  if(b.action==='setup_emrullah'||b.action==='setup_kitchen'){
+   if(me.id!=='owner'||!cookie)err('Kurulum için Melih’in PIN oturumuyla giriş yap.',403);
+   const ownerSession=await db.prepare("SELECT 1 FROM courier_sessions WHERE token_hash=? AND courier_id='owner' AND expires>?").bind(await hashToken(cookie),Date.now()).first();
+   if(!ownerSession)err('Kurulum için Melih’in PIN oturumuyla giriş yap.',403);
+   const kitchen=b.action==='setup_kitchen',username=kitchen?'mutfak':'emrullah',role=kitchen?'kitchen':'admin',name=kitchen?'Mutfak':'Emrullah',id='easypos_'+username;
+   const pin=String(b.pin||'');
+   if(!/^\d{6,12}$/.test(pin))err('PIN 6–12 rakam olmalı.');
+   const duplicate=await db.prepare('SELECT 1 FROM admin_login WHERE username=? OR id=? UNION ALL SELECT 1 FROM courier_roster WHERE username=? UNION ALL SELECT 1 FROM members WHERE id=?').bind(username,id,username,id).first();
+   if(duplicate)err('Bu hesap zaten kayıtlı.',409);
+   const salt=crypto.randomUUID(),hash=await pinHash(pin,salt),now=Date.now();
+   await db.batch([
+    db.prepare('INSERT INTO members (id,email,name,role,active,created) VALUES (?,?,?,?,1,?)').bind(id,id+'@easypos.local',name,role,now),
+    db.prepare('INSERT INTO admin_login (id,username,pin_hash,pin_salt,updated_at) VALUES (?,?,?,?,?)').bind(id,username,hash,salt,now),
+   ]);
+   return json({ok:true});
+  }
   if(b.action==='set_manager_pin')return await saveManagerPin(db,b.pin,me.id);
    if(b.action==='set_admin_login'){
    const username=String(b.username||'').trim().toLowerCase(),pin=String(b.pin||'');if(!/^[a-z0-9_]{3,30}$/.test(username)||!/^[0-9]{6,12}$/.test(pin))err('Kullanıcı adı 3–30 karakter; PIN 6–12 rakam olmalı.');
