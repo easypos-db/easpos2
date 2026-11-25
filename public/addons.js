@@ -450,3 +450,54 @@ loadAd();setInterval(loadAd,5000);setInterval(drawAd,400);})();
   document.addEventListener("click",async function(e){var b=e.target.closest("[data-ad-o],[data-ad-p],[data-ad-k],[data-ad-c],[data-ad-q]");if(!b)return;e.stopPropagation();e.preventDefault();if(b.dataset.adO){var c=b.closest(".card.order-card-open");if(c){c.dataset.ad="0";c.click()}}else if(b.dataset.adP){await fetch("api/printers/manage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"queue_order",id:Number(b.dataset.adP),type:"Adisyon"})});if(typeof toast==="function")toast("Kasa fişi gönderildi.")}else if(b.dataset.adK){await fetch("api/printers/manage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"queue_order",id:Number(b.dataset.adK),type:"Mutfak"})});if(typeof toast==="function")toast("Mutfak fişi gönderildi.")}else if(b.dataset.adC)openCM(Number(b.dataset.adC));else if(b.dataset.adQ)openQM(Number(b.dataset.adQ))},true);
   loadAd();setInterval(loadAd,5000);setInterval(drawAd,400);
 })();
+
+;(function(){
+  if(window.__ad9)return; window.__ad9=true;
+  var oc=Array.of(),cc=Array.of(),mr="";
+  var st=document.createElement("style");
+  st.textContent=".board{display:grid!important;grid-template-columns:repeat(4,minmax(250px,1fr))!important;gap:12px!important}.column{background:#f8fafc!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:0 10px 10px!important;height:calc(100vh - 245px)!important;overflow-y:auto!important}.column-title{position:sticky!important;top:0!important;z-index:5!important;background:#fff!important;border:1px solid #e2e8f0!important;border-radius:10px!important;padding:10px 12px!important;margin:10px 0!important;font-weight:700!important}.card.order-card-open{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:12px!important;padding:12px!important;margin-bottom:10px!important}.ad-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}.ad-badge{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;flex-shrink:0}.ad-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid #f1f5f9}.ad-ico-btn{background:#f8fafc!important;border:1px solid #e2e8f0!important;border-radius:8px!important;padding:6px 4px!important;font-size:14px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important}";
+  document.head.appendChild(st);
+  async function loadAd(){try{var r=await fetch("api/state",{headers:{Accept:"application/json"}});if(r.ok){var d=await r.json();mr=(d.me&&d.me.role)||"";if(Array.isArray(d.orders))oc=d.orders;cc=(Array.isArray(d.people)?d.people:Array.of()).filter(function(m){return m.role==="courier"&&m.active})}}catch(e){}}
+  function isCourierView(){var txt=(document.getElementById("app")&&document.getElementById("app").innerText)||"";return mr==="courier"||txt.includes("Kurye çalışma ekranı")||txt.includes("Hazır paket havuzu")}
+  function pB(p){return p==="Yemeksepeti"?{c:"Y",b:"#fa0050"}:p==="Trendyol"?{c:"T",b:"#f27a1a"}:p==="Getir"?{c:"G",b:"#5d3ebc"}:{c:"R",b:"#0f172a"}}
+  function drawAd(){
+    if(isCourierView())return;
+    document.querySelectorAll(".card.order-card-open[data-order-open]").forEach(function(el){
+      if(el.dataset.ad==="1")return;
+      var id=Number(el.getAttribute("data-order-open")),o=oc.find(function(x){return Number(x.id)===id});
+      if(!o)return; el.dataset.ad="1";
+      var pl=pB(o.platform),m=Math.max(0,Math.floor((Date.now()-Number(o.created||Date.now()))/60000)),tm=String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+      var br=o.brand==="mac"?"Easy Macaroni":o.brand==="mixed"?"Easy Wingy & Macaroni":"Easy Wingy",tp=o.serviceType==="pickup"?"Gel Al":o.serviceType==="table"?"Masa "+(o.tableNo||""):"Paket Servis";
+      var co=cc.find(function(c){return c.id===o.courierId}),cn=co?co.name:"";
+      var mb=(o.serviceType==="package"&&mr==="admin")?"<button type='button' class='ad-ico-btn' title='Çoklu Kurye Seç' data-ad-c='"+o.id+"'>🛵</button>":"<button type='button' class='ad-ico-btn' title='Mutfak Fişi' data-ad-k='"+o.id+"'>🍳</button>";
+      var doneBtn="<button type='button' class='ad-ico-btn' data-ad-done-btn='"+o.id+"' style='background:#fff7ed!important;border-color:#fdba74!important;color:#c2410c!important;font-weight:700!important' title='Hazırlandı / Teslim Edildi'>✓</button>";
+      el.innerHTML="<div class='ad-head'><div style='display:flex;align-items:center;gap:8px'><span class='ad-badge' style='background:"+pl.b+"'>"+pl.c+"</span><div><div style='font-weight:700'>"+(o.customer||"Müşteri")+"</div><div style='font-size:11px;color:#64748b'>"+tm+" dk · "+tp+"</div></div></div><b>#"+o.id+"</b></div><div style='font-size:12px;margin:4px 0'>🏪 "+br+"</div><div style='display:flex;justify-content:space-between;margin:6px 0;font-size:12px'><span style='color:#dc2626;font-weight:600'>"+(o.payment||"Nakit")+"</span><strong style='font-size:14px'>₺"+Number(o.total||0).toLocaleString("tr-TR",{minimumFractionDigits:2})+"</strong></div><div style='font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>"+(o.area||"")+"</div>"+(cn?"<div style='margin-top:6px;font-size:11px;font-weight:700;color:#0369a1;background:#f0f9ff;padding:4px 8px;border-radius:6px'>🛵 "+cn+"</div>":"")+"<div class='ad-bar'><button type='button' class='ad-ico-btn' title='Adisyon Aç' data-ad-o='"+o.id+"'>📄</button><button type='button' class='ad-ico-btn' title='Kasa Fişi Yazdır' data-ad-p='"+o.id+"'>🖨️</button>"+mb+doneBtn+"</div>";
+    });
+  }
+  async function openCM(fid){
+    if(mr!=="admin")return; await loadAd();
+    var old=document.getElementById("adCOv"); if(old)old.remove();
+    var pkgs=oc.filter(function(o){return o.serviceType==="package"&&(o.stage===1||o.stage===2)&&!o.courierId}),sel=new Set(Array.of(Number(fid))),ch=cc.at(0)?cc.at(0).id:"";
+    var ov=document.createElement("div"); ov.id="adCOv";
+    ov.style.cssText="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px";
+    var cr=cc.map(function(c){var n=oc.filter(function(x){return x.courierId===c.id&&x.stage===3}).length;return "<label style='display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #f1f5f9;cursor:pointer'><span><input type='radio' name='adR' value='"+c.id+"' "+(c.id===ch?"checked":"")+"> <b>"+c.name+"</b></span><span style='font-size:11px;font-weight:700;color:"+(n?"#dc2626":"#16a34a")+"'>"+(n?"Teslimatta ("+n+")":"Müsait")+"</span></label>"}).join("")||"<div style='padding:12px'>Kurye yok</div>";
+    var pr=pkgs.map(function(o){return "<label style='display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #f1f5f9;cursor:pointer'><div><b>#"+o.id+" "+o.customer+"</b><div style='font-size:11px;color:#64748b'>"+(o.area||"")+"</div></div><input type='checkbox' data-pk='"+o.id+"' "+(sel.has(Number(o.id))?"checked":"")+"></label>"}).join("");
+    ov.innerHTML="<div style='background:#fff;border-radius:16px;max-width:780px;width:100%;padding:20px'><div style='display:flex;justify-content:space-between;margin-bottom:12px'><b>Kurye Seç ve Teslimata Çıkar</b><button type='button' id='adCX'>×</button></div><div style='display:grid;grid-template-columns:1fr 1fr;gap:14px'><div><b>1. Kurye</b><div style='border:1px solid #e2e8f0;border-radius:10px;margin-top:6px'>"+cr+"</div></div><div><b>2. Paketler (<span id='adSC'>1</span>)</b><div style='border:1px solid #e2e8f0;border-radius:10px;margin-top:6px;max-height:260px;overflow-y:auto'>"+pr+"</div></div></div><div style='display:flex;justify-content:flex-end;gap:8px;margin-top:14px'><button type='button' id='adCC'>Vazgeç</button><button type='button' id='adCG' style='background:#dc2626;color:#fff;border:0;padding:8px 16px;border-radius:8px;font-weight:700'>Teslimata Çıkar</button></div></div>";
+    document.body.appendChild(ov);
+    ov.querySelectorAll("[name='adR']").forEach(function(r){r.onchange=function(){ch=r.value}});
+    ov.querySelectorAll("[data-pk]").forEach(function(cb){cb.onchange=function(){var pid=Number(cb.dataset.pk);if(cb.checked)sel.add(pid);else sel.delete(pid);document.getElementById("adSC").textContent=String(sel.size)}});
+    document.getElementById("adCX").onclick=document.getElementById("adCC").onclick=function(){ov.remove()};
+    document.getElementById("adCG").onclick=async function(){if(!ch||!sel.size)return;for(var pid of sel){var ord=oc.find(function(x){return Number(x.id)===pid});if(!ord)continue;var v=Number(ord.version);if(ord.stage===1){await fetch("api/orders/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,version:v,action:"ready"})});v+=1}await fetch("api/orders/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,version:v,action:"assign",courierId:ch})});await fetch("api/orders/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:pid,version:v+1,action:"depart"})})}ov.remove();location.reload()};
+  }
+  document.addEventListener("click",async function(e){
+    if(isCourierView())return;
+    var b=e.target.closest("[data-ad-o],[data-ad-p],[data-ad-k],[data-ad-c],[data-ad-done-btn]");if(!b)return;
+    e.stopPropagation();e.preventDefault();
+    if(b.dataset.adO){var c=b.closest(".card.order-card-open");if(c){c.dataset.ad="0";c.click()}}
+    else if(b.dataset.adP){await fetch("api/printers/manage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"queue_order",id:Number(b.dataset.adP),type:"Adisyon"})});if(typeof toast==="function")toast("Kasa fişi gönderildi.")}
+    else if(b.dataset.adK){await fetch("api/printers/manage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"queue_order",id:Number(b.dataset.adK),type:"Mutfak"})});if(typeof toast==="function")toast("Mutfak fişi gönderildi.")}
+    else if(b.dataset.adC)openCM(Number(b.dataset.adC));
+    else if(b.dataset.adDoneBtn){var oid=Number(b.dataset.adDoneBtn),ord=oc.find(function(x){return Number(x.id)===oid});if(ord){var act=(ord.stage===0||ord.stage===1)?"ready":"deliver";await fetch("api/orders/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:ord.id,version:ord.version,action:act,collected:true})});location.reload()}}
+  },true);
+  loadAd();setInterval(loadAd,5000);setInterval(drawAd,400);
+})();
