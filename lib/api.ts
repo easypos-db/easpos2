@@ -140,7 +140,7 @@ async function handleCore(request:Request,db:any,env?:any){try{
  if(!me||!me.active)return json({error:'Bu hesap için aktif çalışan yetkisi bulunmuyor. Yöneticinden e-posta adresini eklemesini iste.'},403);
  if(me.role==='kitchen'){
   if(method!=='GET'||path!=='/api/state')err('Mutfak hesabı yalnızca siparişleri görüntüleyebilir.',403);
-  const rows=(await db.prepare("SELECT * FROM orders WHERE demo=0 AND merged_into IS NULL AND ((service_type='table' AND stage<4) OR (service_type IN ('package','pickup') AND stage<2)) ORDER BY created,id").all()).results||[];
+  const rows=(await db.prepare("SELECT * FROM orders WHERE demo=0 AND merged_into IS NULL AND ((service_type='table' AND stage<4) OR (service_type IN ('package','pickup') AND (stage<2 OR business_day=?))) ORDER BY created,id").bind(day()).all()).results||[];
   const orders=rows.map((row:any)=>{
    const order=orderRow(row);
    const {id,brand,platform,serviceType,tableNo,stage,version,created,note,productNotes,adjustments}=order;
@@ -356,7 +356,7 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
    if(!['package','pickup'].includes(o.service_type)||o.stage>=4)err('Yalnızca açık Paket veya Gel-Al siparişleri düzenlenebilir.',409);
    if(!Array.isArray(b.items)||b.items.length<1||b.items.length>75)err('Sepete en az bir ürün ekle.');
    const priorAdjustments=JSON.parse(o.adjustments||'[]') as any[];
-   if(priorAdjustments.some((x:any)=>x.status!=='product_note')||JSON.parse(o.payments||'[]').some((x:any)=>x.scope==='items'))err('Ürün bazlı ödeme veya düzeltme bulunan sipariş bu ekrandan düzenlenemez.');
+   if(priorAdjustments.some((x:any)=>!['product_note','kitchen_ready'].includes(x.status))||JSON.parse(o.payments||'[]').some((x:any)=>x.scope==='items'))err('Ürün bazlı ödeme veya düzeltme bulunan sipariş bu ekrandan düzenlenemez.');
    await ensureMenuSchema(db);const menuRows=(await db.prepare('SELECT id,name,category,ys_price AS ysPrice,brand,vat_rate AS vatRate,active FROM menu_products').all()).results||[],saved=(await db.prepare('SELECT product_id,ys_price FROM product_prices').all()).results||[],priceMap=new Map(saved.map((p:any)=>[p.product_id,p.ys_price]));
    const items:string[]=[],notes:any[]=[],selectedBrands=new Set<string>();
    for(const [index,entry] of b.items.entries()){
@@ -458,17 +458,22 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
   }
   if(a==='kitchen_ready'){
    if(!admin)err('Mutfak işlemi için yönetici yetkisi gerekiyor.',403);
-   if(o.service_type!=='table'||o.stage>=4||o.merged_into)err('Açık masa siparişi bulunamadı.',409);
+   const table=o.service_type==='table';
+   if(o.merged_into||(table ? o.stage>=4 : !['package','pickup'].includes(o.service_type)||o.stage>=2))err('Sipariş artık hazırlıkta değil.',409);
    const items=JSON.parse(o.items) as string[];
    const adjustments=JSON.parse(o.adjustments||'[]') as any[];
+   const selectedIndex=b.index;
+   if((selectedIndex===undefined&&!table)||(selectedIndex!==undefined&&(!Number.isInteger(selectedIndex)||selectedIndex<0||selectedIndex>=items.length)))err('Geçerli bir ürün seç.');
    const prepared=items.flatMap((item,index)=>{
+    if(selectedIndex!==undefined&&index!==selectedIndex)return [];
     const rows=adjustments.filter(x=>x.index===index);
     if(rows.some(x=>['cancelled','refunded'].includes(x.status)))return [];
     const quantity=parseOrderItem(item)?.quantity??1;
     return [{index,status:'kitchen_ready',quantity}];
    });
-   const updated=[...adjustments.filter(x=>x.status!=='kitchen_ready'),...prepared];
-   set='adjustments=?';vals=[JSON.stringify(updated)];detail='Masa ürünleri mutfakta hazırlandı';
+   if(!prepared.length)err('Hazırlanacak ürün bulunamadı.',409);
+   const updated=[...adjustments.filter(x=>x.status!=='kitchen_ready'||(selectedIndex!==undefined&&x.index!==selectedIndex)),...prepared];
+   set='adjustments=?';vals=[JSON.stringify(updated)];detail=selectedIndex===undefined?'Masa ürünleri mutfakta hazırlandı':'Ürün mutfakta hazırlandı';
   }else if(a==='prepare'||a==='ready'){
    if(!canSell)err('Yalnızca yönetici hazırlık durumunu değiştirebilir.',403);
    if(a==='prepare'){
