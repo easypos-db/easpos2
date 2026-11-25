@@ -155,3 +155,49 @@
     }
   }, 500);
 })();
+
+;(function(){
+  setInterval(() => {
+    const app = document.getElementById("app");
+    if (!app) return;
+    const text = app.innerText || "";
+    const isOrderModal = text.includes("AKTİF ADİSYON") || text.includes("Adisyon #") || text.includes("Sipariş #");
+    const isTable = text.includes("Masa / tür Masa") || /Masa\s+[1-9]\b/.test(text);
+    const idMatch = text.match(/(?:Adisyon|Sipariş no|Sipariş)\s*#?(\d+)/i);
+    if (!isOrderModal || isTable || !idMatch || document.getElementById("reprintTicketBtn")) return;
+
+    const orderId = Number(idMatch.at(1));
+    if (!orderId) return;
+
+    const actionBars = Array.from(app.querySelectorAll("button")).filter(b =>
+      ["KAYDET", "Vazgeç", "Kapat", "Hazırlanıyor", "Hazır", "Teslim Edildi"].includes(b.textContent.trim())
+    );
+    const anchor = actionBars.at(0);
+    if (!anchor || !anchor.parentNode) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "reprintTicketBtn";
+    btn.textContent = "FİŞİ YAZDIR";
+    btn.style.cssText = "background:#0f172a;color:#fff;border:0;padding:8px 14px;border-radius:10px;font-weight:700;cursor:pointer;margin-right:8px";
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = "Yazdırılıyor...";
+      try {
+        const res = await fetch("api/printers/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "queue_order", id: orderId, type: "Adisyon" })
+        });
+        if (!res.ok) throw new Error("Yazdırma kuyruğuna eklenemedi");
+        if (typeof toast === "function") toast("Adisyon fişi Kasa yazıcısına gönderildi.");
+      } catch (e) {
+        alert(e.message || "Hata oluştu");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "FİŞİ YAZDIR";
+      }
+    };
+    anchor.parentNode.insertBefore(btn, anchor);
+  }, 600);
+})();
