@@ -15,6 +15,54 @@ async function saveOrderCustomer(db:any,name:string,phone:string,address:string)
 async function ensureOrderSchema(db:any){let pending=schemaReady.get(db);if(!pending){pending=(async()=>{let columns=(await db.prepare('PRAGMA table_info(orders)').all()).results||[];for(const [name,definition] of [['service_type',"TEXT NOT NULL DEFAULT 'package'"],['table_no','INTEGER'],['phone',"TEXT NOT NULL DEFAULT ''"],['adjustments',"TEXT NOT NULL DEFAULT '[]'"],['subtotal','INTEGER NOT NULL DEFAULT 0'],['discount_type',"TEXT NOT NULL DEFAULT 'none'"],['discount_value','INTEGER NOT NULL DEFAULT 0'],['discount_amount','INTEGER NOT NULL DEFAULT 0'],['refund_total','INTEGER NOT NULL DEFAULT 0'],['payments',"TEXT NOT NULL DEFAULT '[]'"],['bill_requested','INTEGER NOT NULL DEFAULT 0'],['paid_item_total','INTEGER NOT NULL DEFAULT 0'],['merged_into','INTEGER']] as const){if(columns.some((c:any)=>c.name===name))continue;try{await db.prepare(`ALTER TABLE orders ADD COLUMN ${name} ${definition}`).run()}catch(e){columns=(await db.prepare('PRAGMA table_info(orders)').all()).results||[];if(!columns.some((c:any)=>c.name===name))throw e;}columns.push({name})}})().catch((e:any)=>{schemaReady.delete(db);throw e});schemaReady.set(db,pending)}await pending}
 export const json=(v:any,status=200)=>Response.json(v,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const err=(message:string,status=400)=>{throw Object.assign(new Error(message),{status})};
+const dailyReportSchema = new WeakMap<object,Promise<void>>();
+
+async function ensureDailyReportSchema(db:any) {
+ let pending=dailyReportSchema.get(db);
+ if(!pending){
+  pending=(async()=>{
+   await db.batch([
+    db.prepare('CREATE TABLE IF NOT EXISTS daily_sales_reports (day TEXT PRIMARY KEY, orders_count INTEGER NOT NULL, net_sales INTEGER NOT NULL, net_received INTEGER NOT NULL, receivable INTEGER NOT NULL, refunds INTEGER NOT NULL, generated_at INTEGER NOT NULL)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS orders_report_delivered ON orders(delivered DESC,id DESC) WHERE demo=0 AND stage=4 AND merged_into IS NULL'),
+   ]);
+  })().catch(error=>{dailyReportSchema.delete(db);throw error});
+  dailyReportSchema.set(db,pending);
+ }
+ await pending;
+}
+
+function reportDayAt(time:number) {
+ return new Date(time+3*3600000).toISOString().slice(0,10);
+}
+
+export async function archiveDailySales(db:any,time=Date.now()) {
+ await ensureOrderSchema(db);
+ await ensureDailyReportSchema(db);
+ const date=reportDayAt(time-86400000);
+ const start=Date.parse(date+'T00:00:00+03:00');
+ await db.prepare(`
+  WITH closed AS (
+   SELECT total,paid_item_total,refund_total,payment,payments
+   FROM orders WHERE demo=0 AND stage=4 AND merged_into IS NULL AND delivered>=? AND delivered<?
+  ), ledger AS (
+   SELECT
+    CASE WHEN json_extract(p.value,'$.method') IN ('Açık Hesap','Açık Hesap (Cari)') AND COALESCE(json_extract(p.value,'$.status'),'paid')='paid' THEN 'receivable'
+     ELSE COALESCE(json_extract(p.value,'$.status'),'paid') END AS status,
+    CAST(json_extract(p.value,'$.amount') AS INTEGER) AS amount
+   FROM closed,json_each(closed.payments) AS p
+   UNION ALL
+   SELECT CASE WHEN payment IN ('Açık Hesap','Açık Hesap (Cari)') THEN 'receivable' ELSE 'paid' END,total
+   FROM closed WHERE json_array_length(payments)=0
+  )
+  INSERT OR IGNORE INTO daily_sales_reports(day,orders_count,net_sales,net_received,receivable,refunds,generated_at)
+  SELECT ?, (SELECT COUNT(*) FROM closed), COALESCE((SELECT SUM(total+paid_item_total) FROM closed),0),
+   COALESCE(SUM(CASE WHEN status='paid' THEN amount WHEN status='refund' THEN -ABS(amount) ELSE 0 END),0),
+   COALESCE(SUM(CASE WHEN status IN ('receivable','receivable_adjustment') THEN amount ELSE 0 END),0),
+   COALESCE((SELECT SUM(refund_total) FROM closed),0), ?
+  FROM ledger
+ `).bind(start,start+86400000,date,time).run();
+}
+
 function orderRow(o:any){const items=JSON.parse(o.items),adjustments=JSON.parse(o.adjustments||'[]'),productNotes=adjustments.filter((a:any)=>a.status==='product_note').map((a:any)=>({index:a.index,note:a.note,source:a.source||'manual',created:a.created})),savedPayments=JSON.parse(o.payments||'[]'),platform=o.platform||'Restoran',fallbackMethod=o.payment==='Online'||o.payment==='Online Ödeme'?(platform==='Trendyol'?'Trendyol Online':platform==='Yemeksepeti'?'YS Online':o.payment):o.payment;const payments=savedPayments.length?savedPayments.map((p:any)=>({...p,method:p.method||fallbackMethod,amount:safeNumber(p.amount)/100})):o.stage===4?[{method:fallbackMethod,amount:safeNumber(o.total)/100,status:o.payment==='Açık Hesap'?'receivable':'paid',created:o.delivered||o.created}]:[];return {id:o.id,brand:o.brand,platform,serviceType:o.service_type||'package',tableNo:o.table_no||null,billRequested:!!o.bill_requested,paidItemTotal:safeNumber(o.paid_item_total)/100,reportTotal:(safeNumber(o.total)+safeNumber(o.paid_item_total))/100,mergedInto:o.merged_into||null,phone:o.phone||'',customer:o.customer,area:o.area,items,adjustments,productNotes,subtotal:safeNumber(o.subtotal||o.total)/100,discountType:o.discount_type||'none',discountValue:safeNumber(o.discount_value)/100,discountAmount:safeNumber(o.discount_amount)/100,refundTotal:safeNumber(o.refund_total)/100,payments,note:o.note,total:safeNumber(o.total)/100,payment:o.payment,stage:safeNumber(o.stage),courierId:o.courier_id,version:safeNumber(o.version),created:safeNumber(o.created),departed:safeNumber(o.departed),delivered:safeNumber(o.delivered),demo:!!o.demo}}
 function parseOrderItem(value:string){const m=String(value).match(/^(\d+) × (.+) · ₺([\d.,]+)$/);if(!m)return null;const unit=Math.round(Number(m[3].replace(/\./g,'').replace(',','.'))*100);if(!Number.isSafeInteger(unit)||unit<0)return null;return {quantity:Number(m[1]),name:m[2],unit}}
 const formatOrderItem=(quantity:number,name:string,unit:number)=>quantity+' × '+name+' · ₺'+(unit/100).toFixed(2).replace('.',',');
@@ -112,14 +160,37 @@ async function handleCore(request:Request,db:any,env?:any){try{
  if(admin&&method==='POST'&&path==='/api/printers/manage') {const b:any=JSON.parse(await request.text());if(b.action==='save'){const id=String(b.id||crypto.randomUUID()),name=String(b.name||'').trim().slice(0,120),address=String(b.address||'').trim().slice(0,160),types=Array.isArray(b.types)?[...new Set(b.types.filter((x:any)=>['Adisyon','Mutfak','Kurye'].includes(x)))]:[],main=types.includes(b.mainChannel)?b.mainChannel:types[0]||'';if(!name||!types.length)err('Yazıcı adı ve en az bir tür gerekli.');await db.prepare('INSERT INTO printer_devices (id,name,address,types,main_channel,active,updated_at) VALUES (?,?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,address=excluded.address,types=excluded.types,main_channel=excluded.main_channel,active=1,updated_at=excluded.updated_at').bind(id,name,address,JSON.stringify(types),main,Date.now()).run();return json({ok:true,id})}if(b.action==='delete'){await db.prepare('UPDATE printer_devices SET active=0,updated_at=? WHERE id=?').bind(Date.now(),String(b.id||'')).run();return json({ok:true})}if(b.action==='bridge_token'){const token='epb_'+crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'');await db.batch([db.prepare('UPDATE print_bridge_tokens SET revoked=1'),db.prepare('INSERT INTO print_bridge_tokens (id,token_hash,created_at,revoked) VALUES (?,?,?,0)').bind(crypto.randomUUID(),await hashToken(token),Date.now())]);return json({ok:true,token})}if(b.action==='webhook_token'){const platform=String(b.platform||'');if(!['Yemeksepeti','Trendyol'].includes(platform))err('Platform seçimi geçersiz.');const token='epw_'+crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'');await db.prepare('INSERT INTO webhook_tokens (platform,token_hash,updated_at) VALUES (?,?,?) ON CONFLICT(platform) DO UPDATE SET token_hash=excluded.token_hash,updated_at=excluded.updated_at').bind(platform,await hashToken(token),Date.now()).run();return json({ok:true,platform,token,url:'/api/webhooks/'+(platform==='Trendyol'?'trendyol':'yemeksepeti')})}if(b.action==='retry_print'){await db.prepare("UPDATE print_queue SET status='pending',claimed_at=NULL,error=NULL WHERE status='failed'").run();return json({ok:true})}if(b.action==='test_print'){const type=String(b.type||'Adisyon'),printer=await db.prepare('SELECT * FROM printer_devices WHERE id=? AND active=1').bind(String(b.id||'')).first();if(!printer)err('Yazıcı bulunamadı.',404);await db.prepare('INSERT INTO print_queue (id,printer_type,printer_name,content,status,created_at) VALUES (?,?,?,?,\'pending\',?)').bind(crypto.randomUUID(),type,printer.name,'EASY POS YAZICI TESTİ\\n'+printer.name+'\\n\\n\\n',Date.now()).run();return json({ok:true})}if(b.action==='queue_order'){const order=await db.prepare('SELECT * FROM orders WHERE id=?').bind(Number(b.id)).first();if(!order)err('Sipariş bulunamadı.',404);const type=String(b.type||'Adisyon');if(!['Adisyon','Mutfak','Kurye'].includes(type))err('Fiş türü geçersiz.');await enqueuePrint(db,order,type);return json({ok:true,queued:true})}if(b.action==='queue_lines'){const order=await db.prepare('SELECT * FROM orders WHERE id=?').bind(Number(b.id)).first();if(!order)err('Sipariş bulunamadı.',404);if(!Array.isArray(b.items)||!b.items.length||b.items.length>75)err('Fiş ürün listesi geçersiz.');await ensureMenuSchema(db);const menu=(await db.prepare('SELECT id,name,ys_price,brand FROM menu_products WHERE active=1').all()).results||[],items:string[]=[],adjustments:any[]=[],brands=new Set<string>();for(const [index,row] of b.items.entries()){const product=menu.find((p:any)=>p.id===row.id),quantity=Number(row.quantity);if(!product||!Number.isInteger(quantity)||quantity<1||quantity>50)err('Fiş için ürün veya adet geçersiz.');items.push(formatOrderItem(quantity,product.name,safeNumber(product.ys_price)));brands.add(product.brand);const note=String(row.productNote||'').trim().slice(0,320);if(note)adjustments.push({index,status:'product_note',note})}await enqueuePrint(db,{...order,items:JSON.stringify(items),adjustments:JSON.stringify(adjustments),brand:brands.size>1?'mixed':brands.values().next().value||order.brand},'Mutfak');return json({ok:true,queued:true})}if(b.action==='webhook_token_status'){return json({webhooks:(await db.prepare('SELECT platform,updated_at FROM webhook_tokens ORDER BY platform').all()).results||[]})}err('Yazıcı işlemi bulunamadı.',404)}
  if(method==='GET'&&path==='/api/menu'){if(!canSell)err('Sipariş menüsüne erişim yetkisi gerekiyor.',403);await ensureMenuSchema(db);const rows=(await db.prepare('SELECT * FROM menu_products ORDER BY category,name').all()).results||[],saved=(await db.prepare('SELECT product_id,ys_price FROM product_prices').all()).results||[],prices=new Map(saved.map((p:any)=>[p.product_id,p.ys_price])),categories=(await db.prepare('SELECT id,name,sort_order FROM menu_categories WHERE active=1 ORDER BY sort_order,name').all()).results||[],vatRates=(await db.prepare('SELECT rate FROM vat_rates WHERE active=1 ORDER BY rate').all()).results||[];return json({products:rows.map((p:any)=>({id:p.id,name:p.name,category:p.category,ysPrice:safeNumber(prices.get(p.id)??p.ys_price),brand:p.brand,vatRate:safeNumber(p.vat_rate),active:!!p.active})),categories,vatRates:vatRates.map((v:any)=>safeNumber(v.rate)),priceSource:'EasyPOS D1'});}
  if(method==='GET'&&path==='/api/customers'){if(!admin)err('Yönetici yetkisi gerekiyor.',403);await ensureMenuSchema(db);const phone=phoneKey(new URL(request.url).searchParams.get('phone'));if(phone){const customer=await db.prepare('SELECT * FROM customers WHERE phone=?').bind(phone).first();return json({customer:customer?{...customer,balance:safeNumber(customer.balance)/100}:null})}const rows=(await db.prepare('SELECT * FROM customers ORDER BY name COLLATE NOCASE LIMIT 2000').all()).results||[];return json({customers:rows.map((c:any)=>({...c,balance:safeNumber(c.balance)/100}))});}
+ if(method==='GET'&&path==='/api/reports/daily'){
+  if(!admin)err('Yönetici yetkisi gerekiyor.',403);
+  await ensureDailyReportSchema(db);
+  const now=Date.now(),yesterday=reportDayAt(now-86400000);
+  const currentMidnight=Date.parse(reportDayAt(now)+'T00:00:00+03:00');
+  if(now-currentMidnight>=600000&&!await db.prepare('SELECT 1 FROM daily_sales_reports WHERE day=?').bind(yesterday).first())await archiveDailySales(db,now);
+  const reports=(await db.prepare('SELECT day,orders_count,net_sales,net_received,receivable,refunds,generated_at FROM daily_sales_reports ORDER BY day DESC').all()).results||[];
+  return json({reports});
+ }
  if(method==='GET'&&path==='/api/history'){
   if(!admin)err('Yönetici yetkisi gerekiyor.',403);
   const q=new URL(request.url).searchParams,from=q.get('from')||day(),to=q.get('to')||from,brandFilter=q.get('brand')||'all',platformFilter=q.get('platform')||'all',courierFilter=q.get('courier')||'all';
   if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to))err('Geçerli tarih aralığı seç.');
   const start=Date.parse(from+'T00:00:00+03:00'),end=Date.parse(to+'T00:00:00+03:00')+86400000;if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>366*86400000)err('Tarih aralığı 1–366 gün olmalı.');
-  const rows=(await db.prepare('SELECT * FROM orders WHERE demo=0 AND stage=4 AND merged_into IS NULL AND delivered>=? AND delivered<? ORDER BY delivered DESC,id DESC LIMIT 5000').bind(start,end).all()).results;
-  const filtered=rows.filter((o:any)=>(brandFilter==='all'||o.brand===brandFilter)&&(platformFilter==='all'||o.platform===platformFilter)&&(courierFilter==='all'||o.courier_id===courierFilter));
-  return json({from,to,orders:filtered.map(orderRow),truncated:rows.length===5000});
+  await ensureDailyReportSchema(db);
+  const filters=['demo=0','stage=4','merged_into IS NULL','delivered>=?','delivered<?'];
+  const values:(string|number)[]=[start,end];
+  for(const [column,value] of [['brand',brandFilter],['platform',platformFilter],['courier_id',courierFilter],['service_type',q.get('service')||'all']]){
+   if(value!=='all'){filters.push(column+'=?');values.push(value)}
+  }
+  const cursor=q.get('cursor');
+  if(cursor){
+   if(!/^\d+:\d+$/.test(cursor))err('Geçersiz rapor sayfası.');
+   const [delivered,id]=cursor.split(':').map(Number);
+   if(!Number.isSafeInteger(delivered)||!Number.isSafeInteger(id))err('Geçersiz rapor sayfası.');
+   filters.push('(delivered,id)<(?,?)');values.push(delivered,id);
+  }
+  const size=250;
+  const rows=(await db.prepare('SELECT * FROM orders WHERE '+filters.join(' AND ')+' ORDER BY delivered DESC,id DESC LIMIT ?').bind(...values,size+1).all()).results||[];
+  const page=rows.slice(0,size),last=page.at(-1);
+  return json({from,to,orders:page.map(orderRow),nextCursor:rows.length>size&&last?last.delivered+':'+last.id:null});
  }
  if(method==='GET'&&path==='/api/state'){
   const people=(await db.prepare("SELECT id,name,role,active FROM members WHERE active=1 UNION ALL SELECT id,name,'courier' AS role,active FROM courier_roster WHERE active=1 AND id NOT IN (SELECT id FROM members)").all()).results;

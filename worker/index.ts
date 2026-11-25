@@ -1,8 +1,13 @@
 import handler from "vinext/server/fetch-handler";
+import { archiveDailySales } from "../lib/api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 const worker = {
+  scheduled(controller: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
+    if (!env.DB) throw new Error("EasyPOS database binding is missing");
+    ctx.waitUntil(archiveDailySales(env.DB, controller.scheduledTime));
+  },
   fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and
