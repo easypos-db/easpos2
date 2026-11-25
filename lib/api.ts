@@ -206,7 +206,7 @@ async function handleCore(request:Request,db:any,env?:any){try{
   if(!admin)err('Yönetici yetkisi gerekiyor.',403);
   return json({events:(await db.prepare('SELECT e.*,m.name AS actor_name FROM events e LEFT JOIN members m ON e.actor=m.id ORDER BY e.id DESC LIMIT 60').all()).results});
  }
- if(method==='POST'&&path==='/api/costs')return await handleCosts(request,db,me,admin);
+ if(method==='POST'&&path==='/api/costs')return await handleCosts(request,db,me,admin,env);
  if(method!=='POST')return json({error:'İşlem bulunamadı.'},404);
  const raw=await request.text();if(raw.length>16000)err('İstek çok büyük.',413);let b;try{b=JSON.parse(raw)}catch{err('Geçersiz JSON.')}
  if(path==='/api/team'||(path==='/api/members'&&b.action==='add_waiter')){

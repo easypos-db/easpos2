@@ -1,3 +1,4 @@
+import { proCosts } from './pro-costs';
 import { catalog } from './catalog';
 import { recipeSeed } from './recipe-seed';
 
@@ -97,7 +98,7 @@ async function readSnapshot(db:any,filters:any={}){
  const components=[...graph.ingredients.values()].filter((item:any)=>item.ingredient_type!=='product').map((item:any)=>({id:item.id,name:item.name,type:item.ingredient_type,unit:item.base_unit,purchaseUnit:item.purchase_unit})).sort((a:any,b:any)=>a.name.localeCompare(b.name,'tr'));
  return {fromDate,toDate,period:fromDate.slice(0,7),orderCount:(closedOrders.results||[]).length,soldUnits,productSales,ingredientConsumption,recipes,subRecipes,ingredients,components,missingRecipes:[...missingRecipes].sort((a,b)=>a.localeCompare(b,'tr'))};
 }
-export async function handleCosts(request:Request,db:any,_me:any,admin:boolean){
+export async function handleCosts(request:Request,db:any,_me:any,admin:boolean,env?:any){
  if(new URL(request.url).pathname!=='/api/costs')return null;
  if(!admin)fail('Reçete ve tüketim raporu için yönetici oturumu gerekli.',403);
  let body:any;try{body=JSON.parse(await request.text())}catch{return json({error:'Geçersiz JSON.'},400)}
@@ -105,6 +106,13 @@ export async function handleCosts(request:Request,db:any,_me:any,admin:boolean){
  await verifyManagerPin(db,body.managerPin);
  const action=String(body.action||'snapshot'),now=Date.now();
  if(action==='snapshot')return json(await readSnapshot(db,body));
+ if(['pro_costs','pro_refresh','pro_import'].includes(action)){
+  try{return json(await proCosts(db,action,env?.EASYPOS_PRO_SERVICE_ACCOUNT,body.source))}
+  catch(error:any){
+   if(action==='pro_import'&&error.message==='Easy Group PRO aktarım dosyası geçersiz.')fail(error.message);
+   throw error;
+  }
+ }
  if(action==='ingredient_save'){
   const id=String(body.id||crypto.randomUUID()),name=String(body.name||'').trim().slice(0,100),purchaseUnit=String(body.purchaseUnit||'');
   if(name.length<2||!validUnit(purchaseUnit))fail('Hammadde adı ve birimi geçerli olmalı.');
