@@ -4,20 +4,159 @@ const offlineDB=()=>window.EasyOffline;
 function cacheKey(path){return 'api:'+path}
 async function putSnapshot(path,value){try{await offlineDB().put('snapshots',{key:cacheKey(path),value,savedAt:Date.now()})}catch{}}
 async function offlineQueue(path,body,key){const db=offlineDB();if(!db||!['orders/create','orders/action'].includes(path))throw new Error('Bu işlem çevrimdışı sıraya alınamıyor. İnternet bağlantısı gerekli.');const orderId=Number(body?.id);if(path==='orders/action'&&orderId<0){const pending=await db.get('pendingOrders',orderId);if(!pending)throw new Error('Çevrimdışı adisyon kaydı bulunamadı.');const allowed=applyPendingAction(pending,body);if(!allowed)throw new Error('Bu adisyon işlemi internet bağlantısı gerektiriyor.');pending.updatedAt=Date.now();await db.put('pendingOrders',pending);const queue=await db.all('outbox'),create=queue.find(item=>item.key===pending.createKey);if(create){create.body=pending.payload;await db.put('outbox',create)}return {ok:true,queued:true,id:orderId}}
- const entry={key,path,body:{...body},createdAt:Date.now(),blocked:false};if(path==='orders/create'){const menu=await db.get('snapshots','api:menu'),products=menu?.value?.products||[];if(!products.length)throw new Error('Çevrimdışı ürün listesi bulunamadı. Önce internet açıkken menüyü yükle.');const localId=-Date.now(),lines=[],adjustments=[],brands=new Set();for(const [index,item] of (body.items||[]).entries()){const product=products.find(x=>x.id===item.id);if(!product)throw new Error('Ürün çevrimdışı menü kopyasında yok: '+item.id);const quantity=Number(item.quantity)||1,unit=Number(product.ysPrice)||0;lines.push(`${quantity} × ${product.name} · ₺${(unit/100).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}`);if(item.productNote)adjustments.push({index,status:'product_note',note:item.productNote,source:'manual',created:Date.now()});brands.add(product.brand)}const cents=(body.items||[]).reduce((sum,item)=>sum+(Number(products.find(x=>x.id===item.id)?.ysPrice)||0)*(Number(item.quantity)||1),0),discountType=body.discountType||'none',discountValue=Number(body.discountValue)||0,discountAmount=discountType==='percent'?Math.min(cents,Math.round(cents*discountValue/10000)):discountType==='amount'?Math.min(cents,discountValue):0,serviceType=body.serviceType||'package';entry.body={...body,_offlineId:localId};const order={id:localId,brand:brands.size>1?'mixed':brands.values().next().value||'wingy',platform:body.platform||'Restoran',serviceType,tableNo:body.tableNo||null,billRequested:false,paidItemTotal:0,mergedInto:null,phone:body.phone||'',customer:body.customer||`Masa ${body.tableNo||''}`,area:body.area||'',items:lines,adjustments,productNotes:adjustments.map(x=>({index:x.index,note:x.note,source:x.source,created:x.created})),note:body.note||'',subtotal:cents/100,discountType,discountValue:discountValue/100,discountAmount:discountAmount/100,refundTotal:0,payments:[],total:(cents-discountAmount)/100,payment:body.payment||'Nakit',stage:serviceType==='table'?0:1,courierId:null,version:1,created:Date.now(),delivered:null,pendingSync:true};const state=await db.get('snapshots','api:state');const openTable=serviceType==='table'?(state?.value?.orders||[]).find(x=>x.serviceType==='table'&&x.tableNo===Number(body.tableNo)&&x.stage<4):null;if(openTable){openTable.items=[...openTable.items,...order.items];openTable.total+=order.total;openTable.subtotal+=order.subtotal;openTable.version++;openTable.pendingSync=true;entry.body._offlineRecordId=openTable.id;await db.put('pendingOrders',{id:openTable.id,createKey:key,payload:entry.body,order:openTable,updatedAt:Date.now()});await putSnapshot('state',{...state.value,orders:state.value.orders.map(x=>x.id===openTable.id?openTable:x),offline:true})}else{const pending={id:localId,createKey:key,payload:entry.body,order,updatedAt:Date.now()};await db.put('pendingOrders',pending)}}
- const seq=await db.add('outbox',entry);entry.seq=seq;if(path==='orders/action'&&orderId>0)await applyExistingOffline(orderId,body);return {ok:true,queued:true,id:path==='orders/create'?entry.body._offlineId:body.id}}
+ const entry={key,path,body:{...body},createdAt:Date.now(),blocked:false};if(path==='orders/create'){const menu=await db.get('snapshots','api:menu'),products=menu?.value?.products||[];if(!products.length)throw new Error('Çevrimdışı ürün listesi bulunamadı. Önce internet açıkken menüyü yükle.');const localId=-Date.now(),lines=[],adjustments=[],brands=new Set();for(const [index,item] of (body.items||[]).entries()){const product=products.find(x=>x.id===item.id);if(!product)throw new Error('Ürün çevrimdışı menü kopyasında yok: '+item.id);const quantity=Number(item.quantity)||1,unit=Number(product.ysPrice)||0;lines.push(`${quantity} × ${product.name} · ₺${(unit/100).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}`);if(item.productNote)adjustments.push({index,status:'product_note',note:item.productNote,source:'manual',created:Date.now()});brands.add(product.brand)}const cents=(body.items||[]).reduce((sum,item)=>sum+(Number(products.find(x=>x.id===item.id)?.ysPrice)||0)*(Number(item.quantity)||1),0),discountType=body.discountType||'none',discountValue=Number(body.discountValue)||0,discountAmount=discountType==='percent'?Math.min(cents,Math.round(cents*discountValue/10000)):discountType==='amount'?Math.min(cents,discountValue):0,serviceType=body.serviceType||'package';entry.body={...body,_offlineId:localId};const order={id:localId,brand:brands.size>1?'mixed':brands.values().next().value||'wingy',platform:body.platform||'Restoran',serviceType,tableNo:body.tableNo||null,billRequested:false,paidItemTotal:0,mergedInto:null,phone:body.phone||'',customer:body.customer||`Masa ${body.tableNo||''}`,area:body.area||'',items:lines,adjustments,productNotes:adjustments.map(x=>({index:x.index,note:x.note,source:x.source,created:x.created})),note:body.note||'',subtotal:cents/100,discountType,discountValue:discountValue/100,discountAmount:discountAmount/100,refundTotal:0,payments:[],total:(cents-discountAmount)/100,payment:body.payment||'Nakit',stage:serviceType==='table'?0:1,courierId:null,version:1,created:Date.now(),delivered:null,pendingSync:true};const state=await db.get('snapshots','api:state');const openTable=serviceType==='table'?(state?.value?.orders||[]).find(x=>x.serviceType==='table'&&x.tableNo===Number(body.tableNo)&&x.stage<4):null;if(openTable){entry.tableOrderId=openTable.id}else{const pending={id:localId,createKey:key,payload:entry.body,order,updatedAt:Date.now()};await db.put('pendingOrders',pending)}}
+ const seq=await db.add('outbox',entry);entry.seq=seq;return {ok:true,queued:true,id:path==='orders/create'?entry.body._offlineId:body.id}}
 function applyPendingAction(pending,b){const o=pending.order;if(b.action==='payment_add'){const amount=Number(b.amount)||0,method=String(b.paymentMethod||'Nakit');if(amount<0)return false;o.payments=[...(o.payments||[]),{method,amount:amount/100,status:method==='Açık Hesap (Cari)'?'receivable':'paid',created:Date.now()}];const paid=o.payments.reduce((n,p)=>n+(Number(p.amount)||0),0);if(paid>=o.total){o.stage=4;o.delivered=Date.now()}pending.payload.offlineState={payments:o.payments.map(p=>({...p,amount:Math.round(p.amount*100)})),stage:o.stage,delivered:o.delivered};return true}if(b.action==='table_bill_request'){o.billRequested=!!b.requested;pending.payload.offlineState={...(pending.payload.offlineState||{}),billRequested:o.billRequested};return true}if(b.action==='discount_set'){const type=b.discountType||'none',value=Number(b.discountValue)||0;pending.payload.discountType=type;pending.payload.discountValue=value;o.discountType=type;o.discountValue=value/100;const gross=Math.round(o.subtotal*100),discount=type==='percent'?Math.min(gross,Math.round(gross*value/10000)):type==='amount'?Math.min(gross,value):0;o.discountAmount=discount/100;o.total=(gross-discount)/100;return true}return false}
-async function replayOutbox(){if(!navigator.onLine||!offlineDB())return;const queue=(await offlineDB().all('outbox')).sort((a,b)=>a.seq-b.seq);for(const item of queue){if(item.blocked)break;try{const response=await fetch('/api/'+item.path,{method:'POST',headers:{'Content-Type':'application/json','X-Idempotency-Key':item.key},body:JSON.stringify(item.body),cache:'no-store'});let data={};try{data=await response.json()}catch{}if(!response.ok){item.blocked=true;item.error=data.error||'Senkronizasyon reddedildi ('+response.status+')';await offlineDB().put('outbox',item);toast('Çevrimdışı işlem sunucuya aktarılamadı: '+item.error,true);break}await offlineDB().remove('outbox',item.seq);if(item.path==='orders/create'&&(item.body._offlineRecordId||item.body._offlineId))await offlineDB().remove('pendingOrders',item.body._offlineRecordId||item.body._offlineId)}catch{break}}}
+let outboxRetryAt = 0;
+
+async function replayOutbox() {
+  if (!navigator.onLine || !offlineDB() || Date.now() < outboxRetryAt) return;
+  if (navigator.locks) {
+    await navigator.locks.request('easypos-outbox', { ifAvailable: true }, lock => lock && sendOutbox());
+  } else {
+    await sendOutbox();
+  }
+}
+
+async function sendOutbox() {
+  const db = offlineDB();
+  const queue = (await db.all('outbox')).sort((a,b) => a.seq - b.seq);
+  for (const item of queue) {
+    if (item.blocked) break;
+    try {
+      const response = await fetch('/api/' + item.path, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-Idempotency-Key': item.key},
+        body: JSON.stringify(item.body), cache: 'no-store', signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) {
+        if ([401, 408, 425, 429].includes(response.status) || response.status >= 500) {
+          const retryAfter = response.headers.get('Retry-After');
+          const wait = retryAfter && Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+          outboxRetryAt = Date.now() + Math.max(5000, wait || 0);
+          break;
+        }
+        const data = await response.json().catch(() => ({}));
+        await db.put('outbox', {...item, blocked: true, error: data.error || 'Sunucu işlemi reddetti (' + response.status + ').'});
+        break;
+      }
+      if (item.path === 'orders/create') {
+        const id = item.body._offlineRecordId || item.body._offlineId;
+        const pending = id && await db.get('pendingOrders', id);
+        if (pending?.createKey === item.key) await db.remove('pendingOrders', id);
+      }
+      await db.remove('outbox', item.seq);
+    } catch {
+      outboxRetryAt = Date.now() + 5000;
+      break;
+    }
+  }
+}
+
+async function renderSyncQueue() {
+  const queue = (await offlineDB().all('outbox')).sort((a,b) => a.seq - b.seq);
+  const first = queue[0];
+  const rows = queue.map(item => {
+    const target = item.body.tableNo ? 'Masa ' + item.body.tableNo : item.body.id ? '#' + item.body.id : '';
+    const operation = item.path === 'orders/create' ? 'Sipariş' : item.body.action === 'payment_add' ? 'Ödeme' : 'Sipariş güncellemesi';
+    return `<li><strong>${operation} ${esc(target)}</strong><p>${item.blocked ? esc(item.error || 'İnceleme gerekiyor.') : 'Eşitleme bekleniyor'}</p></li>`;
+  }).join('');
+  document.getElementById('syncQueueList').innerHTML = rows || '<li>Bekleyen işlem yok.</li>';
+  document.getElementById('syncQueueRetry').disabled = !first || !navigator.onLine;
+}
+
+async function openSyncQueue() {
+  try {
+    await renderSyncQueue();
+    document.getElementById('syncQueueDialog').showModal();
+  } catch {
+    toast('Bu cihazın eşitleme kuyruğu açılamadı.', true);
+  }
+}
+
+async function retrySyncQueue() {
+  if (!me || me.role === 'kitchen' || polling || !navigator.onLine) return;
+  const button = document.getElementById('syncQueueRetry');
+  button.disabled = true;
+  try {
+    const db = offlineDB();
+    const first = (await db.all('outbox')).sort((a,b) => a.seq - b.seq)[0];
+    if (first?.blocked) await db.put('outbox',{...first,blocked:false});
+    outboxRetryAt = 0;
+    await sync(true);
+    await renderSyncQueue();
+  } catch {
+    button.disabled = false;
+    toast('Eşitleme yeniden denenemedi.', true);
+  }
+}
+
 async function offlineSnapshot(path){const saved=await offlineDB().get('snapshots',cacheKey(path));if(!saved)throw new Error('Bu ekranın çevrimdışı kopyası yok. İnternet varken bir kez açıp veriyi eşitle.');let value=structuredClone(saved.value);if(path==='state'){if(value.me?.role!=='kitchen')value=await overlayLocalOrders(value);value.offline=true;value.pendingWrites=value.me?.role==='kitchen'?0:await offlineDB().count('outbox')}return value}
 function projectQueuedAction(order,b){if(!order)return;if(b.action==='table_bill_request')order.billRequested=!!b.requested;else if(b.action==='payment_add'){const amount=(Number(b.amount)||0)/100,method=b.paymentMethod||'Nakit';order.payments=[...(order.payments||[]),{method,amount,status:method==='Açık Hesap (Cari)'?'receivable':'paid',created:Date.now()}];if(order.payments.reduce((n,x)=>n+(Number(x.amount)||0),0)>=order.total){order.stage=4;order.delivered=Date.now()}}else if(b.action==='kitchen_ready')projectKitchenReady(order);else if(b.action==='prepare')order.stage=1;else if(b.action==='ready')order.stage=2;else if(b.action==='depart')order.stage=3;else if(b.action==='deliver'||b.action==='settle'){order.stage=4;order.delivered=Date.now()}else if(b.action==='discount_set'){order.discountType=b.discountType||'none';order.discountValue=(Number(b.discountValue)||0)/100;const subtotal=Math.round((Number(order.subtotal)||0)*100),discount=order.discountType==='percent'?Math.min(subtotal,Math.round(subtotal*(Number(b.discountValue)||0)/10000)):order.discountType==='amount'?Math.min(subtotal,Number(b.discountValue)||0):0;order.discountAmount=discount/100;order.total=(subtotal-discount)/100}order.version=(Number(order.version)||0)+1;order.pendingSync=true}
-async function overlayLocalOrders(value){const db=offlineDB(),pending=await db.all('pendingOrders'),queue=(await db.all('outbox')).sort((a,b)=>a.seq-b.seq),rows=[...(value.orders||[])];for(const p of pending){const i=rows.findIndex(x=>x.id===p.order.id);if(i>=0)rows[i]=p.order;else rows.push(p.order)}for(const item of queue){if(item.path==='orders/action'&&Number(item.body?.id)>0){const target=rows.find(x=>x.id===Number(item.body.id));if(target)projectQueuedAction(target,item.body)}else if(item.path==='orders/create'&&item.body?.serviceType==='table'){const target=rows.find(x=>x.serviceType==='table'&&x.tableNo===Number(item.body.tableNo)&&x.stage<4);if(target&&!target.pendingSync){const menu=(await db.get('snapshots','api:menu'))?.value?.products||[],lines=(item.body.items||[]).map(x=>{const p=menu.find(y=>y.id===x.id);return p?`${x.quantity} × ${p.name} · ₺${(p.ysPrice/100).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})}`:null}).filter(Boolean);target.items=[...target.items,...lines];target.pendingSync=true}}}value.orders=rows;value.pendingWrites=queue.length;return value}
-async function applyExistingOffline(id,b){const snapshot=await offlineDB().get('snapshots','api:state');if(!snapshot)return;const state=snapshot.value,order=(state.orders||[]).find(x=>x.id===id);projectQueuedAction(order,b);if(order)await offlineDB().put('snapshots',{...snapshot,value:{...state,offline:true}})}
+async function overlayLocalOrders(value) {
+  const db = offlineDB();
+  const pending = await db.all('pendingOrders');
+  const queue = (await db.all('outbox')).sort((a,b) => a.seq - b.seq);
+  const blockedAt = queue.findIndex(item => item.blocked);
+  const eligible = blockedAt < 0 ? queue : queue.slice(0, blockedAt);
+  const activeKeys = new Set(eligible.map(item => item.key));
+  const rows = structuredClone(value.orders || []);
+  for (const item of pending) {
+    if (!activeKeys.has(item.createKey)) continue;
+    const index = rows.findIndex(order => order.id === item.id);
+    if (index >= 0 && !value.offline) continue;
+    if (index >= 0) rows[index] = item.order;
+    else if (item.id < 0) rows.push(item.order);
+  }
+  const hasTableAdditions = eligible.some(item => item.tableOrderId || item.body._offlineRecordId);
+  const menu = hasTableAdditions ? (await db.get('snapshots','api:menu'))?.value?.products || [] : [];
+  for (const item of eligible) {
+    const body = item.body;
+    if (item.path === 'orders/action' && Number(body.id) > 0) {
+      const target = rows.find(order => order.id === Number(body.id));
+      // Older clients already applied some actions to their saved state.
+      if (target?.version === Number(body.version)) projectQueuedAction(target, body);
+    } else if (item.path === 'orders/create' && body.serviceType === 'table') {
+      const id = item.tableOrderId || body._offlineRecordId;
+      if (!id || (value.offline && body._offlineRecordId)) continue;
+      const target = rows.find(order => order.id === id && order.stage < 4);
+      if (target) projectTableAddition(target,body,menu);
+    }
+  }
+  return {...value,orders:rows,pendingWrites:queue.length,syncBlocked:queue.filter(item => item.blocked).length};
+}
+
+function projectTableAddition(order, body, menu) {
+  const items = [...order.items];
+  const adjustments = [...(order.adjustments || [])];
+  let added = 0;
+  for (const entry of body.items || []) {
+    const product = menu.find(row => row.id === entry.id);
+    if (!product) continue;
+    if (entry.productNote) adjustments.push({index:items.length,status:'product_note',note:entry.productNote});
+    items.push(`${entry.quantity} × ${product.name} · ${money(product.ysPrice / 100)}`);
+    added += product.ysPrice * entry.quantity;
+  }
+  if (!added) return;
+  order.items = items;
+  order.adjustments = adjustments;
+  order.subtotal = (Math.round(order.subtotal * 100) + added) / 100;
+  order.total = (Math.round(order.total * 100) + added) / 100;
+  order.billRequested = false;
+  if (body.discountType || order.discountType === 'percent') {
+    projectQueuedAction(order,{action:'discount_set',discountType:body.discountType || order.discountType,discountValue:body.discountValue ?? Math.round(order.discountValue * 100)});
+  } else {
+    order.version++;
+    order.pendingSync = true;
+  }
+}
+
+
 function integrationToast(message){document.querySelector('.integration-toast')?.remove();const card=document.createElement('div');card.className='toast integration-toast';card.textContent=message;document.body.append(card);setTimeout(()=>card.remove(),7000)}
 async function api(path,body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000),key=body&&['orders/create','orders/action'].includes(path)?crypto.randomUUID():null;try{if(!navigator.onLine){if(body)return await offlineQueue(path,body,key);const cached=await offlineSnapshot(path);cached.offline=true;return cached}const headers=body?{'Content-Type':'application/json'}:{};if(key)headers['X-Idempotency-Key']=key;const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});const data=await r.json();if(!r.ok){const e=new Error(data.error||'İşlem tamamlanamadı.');e.status=r.status;throw e}await putSnapshot(path,data);if(path==='state'&&data.me?.role!=='kitchen'){const state=await overlayLocalOrders(data);if(state.pendingWrites)state.syncPending=true;return state}return data}catch(e){if(body&&(navigator.onLine===false||e instanceof TypeError||e.name==='AbortError'))return await offlineQueue(path,body,key);if(!body&&(navigator.onLine===false||e instanceof TypeError||e.name==='AbortError'))return await offlineSnapshot(path);if(e.name==='AbortError')throw new Error('Sunucu yanıt vermedi. Bağlantını kontrol edip tekrar dene.');throw e}finally{clearTimeout(timer)}}
 function setConnection(ok,pending=0){online=ok;const label=(ok?'Çevrimiçi':'Çevrimdışı')+(pending?' · '+pending+' bekleyen':'');document.getElementById('connection').textContent=ok?'Çevrimiçi':'Çevrimdışı';document.getElementById('syncBadge').textContent=label;document.getElementById('syncBadge').classList.toggle('offline',!ok);document.getElementById('connectionDot').style.background=ok?'#80bf94':'#e7a357';document.getElementById('lastSync').textContent=ok?'Güncellendi: '+new Intl.DateTimeFormat('tr-TR',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Europe/Istanbul'}).format(new Date()):'Yerel kayıt kuyruğu etkin'}
-function locked(message,status){authBlocked=true;document.getElementById('connection').textContent='Oturum gerekli';document.getElementById('lastSync').textContent='Giriş bekleniyor';me=null;orders=[];people=[];document.getElementById('identity').textContent='Giriş gerekli';document.getElementById('authLink').hidden=true;document.getElementById('logoutButton').hidden=true;document.getElementById('nav').innerHTML='';document.getElementById('app').innerHTML=`<div class="section locked"><h2>EasyPOS girişi</h2><p class="fine">Kullanıcı adın ve yöneticinin belirlediği PIN ile giriş yap.</p><form id="loginForm"><div class="form-grid"><label>Kullanıcı adı<input name="username" required autocomplete="username" placeholder="azat"></label><label>PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,12}" minlength="6" maxlength="12" required autocomplete="current-password"></label></div><p class="fine" id="loginError" role="alert"></p><button class="primary" type="submit">Giriş yap</button></form><p class="fine">Yönetici hesabı: <a href="/signin-with-chatgpt?return_to=%2F" target="_top">ChatGPT ile giriş yap →</a></p></div>`;document.getElementById('loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),button=e.target.querySelector('button');button.disabled=true;try{await api('login',{username:f.get('username'),pin:f.get('pin')});authBlocked=false;await sync(true)}catch(error){document.getElementById('loginError').textContent=error.message}finally{button.disabled=false}}}
+function locked(message,status){const queueButton=document.getElementById('syncQueueOpen');if(queueButton)queueButton.hidden=true;authBlocked=true;document.getElementById('connection').textContent='Oturum gerekli';document.getElementById('lastSync').textContent='Giriş bekleniyor';me=null;orders=[];people=[];document.getElementById('identity').textContent='Giriş gerekli';document.getElementById('authLink').hidden=true;document.getElementById('logoutButton').hidden=true;document.getElementById('nav').innerHTML='';document.getElementById('app').innerHTML=`<div class="section locked"><h2>EasyPOS girişi</h2><p class="fine">Kullanıcı adın ve yöneticinin belirlediği PIN ile giriş yap.</p><form id="loginForm"><div class="form-grid"><label>Kullanıcı adı<input name="username" required autocomplete="username" placeholder="azat"></label><label>PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,12}" minlength="6" maxlength="12" required autocomplete="current-password"></label></div><p class="fine" id="loginError" role="alert"></p><button class="primary" type="submit">Giriş yap</button></form><p class="fine">Yönetici hesabı: <a href="/signin-with-chatgpt?return_to=%2F" target="_top">ChatGPT ile giriş yap →</a></p></div>`;document.getElementById('loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),button=e.target.querySelector('button');button.disabled=true;try{await api('login',{username:f.get('username'),pin:f.get('pin')});authBlocked=false;await sync(true)}catch(error){document.getElementById('loginError').textContent=error.message}finally{button.disabled=false}}}
 
-function stateSignature(s){return (s.orders||[]).map(o=>o.id+':'+o.version+':'+o.stage).join('|')+'#'+(s.people||[]).map(p=>p.id+':'+p.active+':'+p.name).join('|')+'#'+(s.me?.id||'')+':'+(s.me?.role||'')}async function sync(renderNow=false){if(polling)return;polling=true;try{if(navigator.onLine&&me&&me.role!=='kitchen')await replayOutbox();const s=await api('state');if(s.me.role==='kitchen'&&!s.offline)notifyKitchen(s.orders);const previousIds=new Set(orders.map(order=>order.id)),hadState=!!lastStateSignature,arrivals=(s.orders||[]).filter(order=>order.stage<4&&['Yemeksepeti','Trendyol'].includes(order.platform)&&!previousIds.has(order.id));const signature=stateSignature(s),changed=signature!==lastStateSignature;lastStateSignature=signature;authBlocked=false;orders=s.orders;people=s.people;if(hadState&&arrivals.length){integrationToast('Yeni entegrasyon siparişi var · #'+arrivals[0].id);try{const Audio=window.AudioContext||window.webkitAudioContext;if(Audio){const ctx=new Audio(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=880;gain.gain.setValueAtTime(.12,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.35);osc.start();osc.stop(ctx.currentTime+.35)}}catch{}}const first=!me;me=s.me;lastDay=s.day;if(me.role==='waiter'){activeCourier='';if(first||!['tables','pickup'].includes(view))view='tables'}else if(me.role==='kitchen'){activeCourier='';view='kitchen'}else if(!isAdmin()){activeCourier=me.id;view='courier'}else if(!activeCourier||!couriers().some(p=>p.id===activeCourier))activeCourier=couriers()[0]?.id||'';setConnection(!s.offline,s.pendingWrites||0);document.getElementById('identity').textContent=me.name+' · '+(isAdmin()?'Yönetici':me.role==='kitchen'?'Mutfak':me.role==='waiter'?'Garson':'Kurye');document.getElementById('authLink').hidden=!s.nativeIdentity;document.getElementById('logoutButton').hidden=!!s.nativeIdentity;if(first)renderNav();if(changed||renderNow)render();if(first&&isAdmin()){if(view==='menu')await loadMenu();else if(view==='reports')await loadOrderHistory('reports');else if(view==='packageHistory')await loadOrderHistory('packageHistory');else if(view==='team')await loadTeam();else if(view==='history')await loadEvents();const entry=restoreOrderEntry();if(entry)await openOrder(entry.service,entry.tableNo)}}catch(e){setConnection(false);if(e.status===401||e.status===403)locked(e.message,e.status);else if(renderNow)document.getElementById('app').innerHTML=`<div class="section"><h3>Sunucuya ulaşılamadı</h3><p class="fine">${esc(e.message)} Yeniden bağlanma otomatik deneniyor.</p><button data-action="retry">Tekrar dene</button></div>`}finally{polling=false}}
+function stateSignature(s){return (s.orders||[]).map(o=>o.id+':'+o.version+':'+o.stage).join('|')+'#'+(s.people||[]).map(p=>p.id+':'+p.active+':'+p.name).join('|')+'#'+(s.me?.id||'')+':'+(s.me?.role||'')}async function sync(renderNow=false){if(polling)return;polling=true;try{if(navigator.onLine&&me&&me.role!=='kitchen')await replayOutbox();const s=await api('state');if(s.me.role==='kitchen'&&!s.offline)notifyKitchen(s.orders);const previousIds=new Set(orders.map(order=>order.id)),hadState=!!lastStateSignature,arrivals=(s.orders||[]).filter(order=>order.stage<4&&['Yemeksepeti','Trendyol'].includes(order.platform)&&!previousIds.has(order.id));const signature=stateSignature(s),changed=signature!==lastStateSignature;lastStateSignature=signature;authBlocked=false;orders=s.orders;people=s.people;if(hadState&&arrivals.length){integrationToast('Yeni entegrasyon siparişi var · #'+arrivals[0].id);try{const Audio=window.AudioContext||window.webkitAudioContext;if(Audio){const ctx=new Audio(),osc=ctx.createOscillator(),gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=880;gain.gain.setValueAtTime(.12,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.35);osc.start();osc.stop(ctx.currentTime+.35)}}catch{}}const first=!me;me=s.me;lastDay=s.day;if(me.role==='waiter'){activeCourier='';if(first||!['tables','pickup'].includes(view))view='tables'}else if(me.role==='kitchen'){activeCourier='';view='kitchen'}else if(!isAdmin()){activeCourier=me.id;view='courier'}else if(!activeCourier||!couriers().some(p=>p.id===activeCourier))activeCourier=couriers()[0]?.id||'';setConnection(!s.offline,s.pendingWrites||0);const queueButton=document.getElementById('syncQueueOpen');if(queueButton){queueButton.hidden=!(s.pendingWrites>0);queueButton.textContent=s.syncBlocked?'Eşitleme · '+s.syncBlocked+' hata':'Eşitleme · '+(s.pendingWrites||0)+' bekleyen'}document.getElementById('identity').textContent=me.name+' · '+(isAdmin()?'Yönetici':me.role==='kitchen'?'Mutfak':me.role==='waiter'?'Garson':'Kurye');document.getElementById('authLink').hidden=!s.nativeIdentity;document.getElementById('logoutButton').hidden=!!s.nativeIdentity;if(first)renderNav();if(changed||renderNow)render();if(first&&isAdmin()){if(view==='menu')await loadMenu();else if(view==='reports')await loadOrderHistory('reports');else if(view==='packageHistory')await loadOrderHistory('packageHistory');else if(view==='team')await loadTeam();else if(view==='history')await loadEvents();const entry=restoreOrderEntry();if(entry)await openOrder(entry.service,entry.tableNo)}}catch(e){setConnection(false);if(e.status===401||e.status===403)locked(e.message,e.status);else if(renderNow)document.getElementById('app').innerHTML=`<div class="section"><h3>Sunucuya ulaşılamadı</h3><p class="fine">${esc(e.message)} Yeniden bağlanma otomatik deneniyor.</p><button data-action="retry">Tekrar dene</button></div>`}finally{polling=false}}
 async function mutate(path,body){if(busy){toast('Önceki işlem tamamlanıyor, lütfen bekle.');return false}busy=true;document.body.classList.add('busy');try{const result=await api(path,body);await sync(true);if(result?.queued)toast('İşlem bu cihazda saklandı; bağlantı gelince D1 ile eşitlenecek.');return result||true}catch(e){toast(e.message,true);await sync(true);return false}finally{busy=false;document.body.classList.remove('busy')}}
 function renderNav() {
   const service = [
@@ -296,7 +435,10 @@ document.getElementById('orderProductSearch')?.addEventListener('input', renderO
 document.querySelectorAll('[data-order-mobile-pane]').forEach(button => {
   button.addEventListener('click', () => showMobileOrderPane(button.dataset.orderMobilePane));
 });
-document.getElementById('closeOrder').onclick=closeOrderScreen;document.getElementById('cancelOrder').onclick=closeOrderScreen;document.getElementById('orderForm').onsubmit=async e=>{e.preventDefault();await saveOrderItems(orderService!=='table')};document.getElementById('closeDialog').onclick=()=>document.getElementById('assignDialog').close();document.getElementById('confirmAssign').onclick=async()=>{const o=orders.find(o=>o.id===assignId);if(!o)return;const ok=await mutate('orders/action',{id:o.id,version:o.version,action:'assign',courierId:document.getElementById('assignCourier').value});if(ok){document.getElementById('assignDialog').close();toast('Paket kuryeye ayrıldı')}};document.getElementById('logoutButton').onclick=async()=>{try{await api('logout',{});try{await offlineDB()?.clear('snapshots')}catch{}location.reload()}catch(e){toast(e.message,true)}};document.getElementById('date').textContent=new Intl.DateTimeFormat('tr-TR',{dateStyle:'full',timeZone:'Europe/Istanbul'}).format(new Date());sync(true);setInterval(()=>{if(!authBlocked&&!document.hidden&&!busy&&!document.querySelector('dialog[open]')&&!['INPUT','SELECT'].includes(document.activeElement?.tagName))sync()},5000);window.addEventListener('focus',()=>sync());window.addEventListener('online',()=>{replayOutbox().then(()=>sync(true))});window.addEventListener('offline',()=>setConnection(false));if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+document.getElementById('syncQueueOpen')?.addEventListener('click',openSyncQueue);
+document.getElementById('syncQueueClose')?.addEventListener('click',()=>document.getElementById('syncQueueDialog').close());
+document.getElementById('syncQueueRetry')?.addEventListener('click',retrySyncQueue);
+document.getElementById('closeOrder').onclick=closeOrderScreen;document.getElementById('cancelOrder').onclick=closeOrderScreen;document.getElementById('orderForm').onsubmit=async e=>{e.preventDefault();await saveOrderItems(orderService!=='table')};document.getElementById('closeDialog').onclick=()=>document.getElementById('assignDialog').close();document.getElementById('confirmAssign').onclick=async()=>{const o=orders.find(o=>o.id===assignId);if(!o)return;const ok=await mutate('orders/action',{id:o.id,version:o.version,action:'assign',courierId:document.getElementById('assignCourier').value});if(ok){document.getElementById('assignDialog').close();toast('Paket kuryeye ayrıldı')}};document.getElementById('logoutButton').onclick=async()=>{try{await api('logout',{});try{await offlineDB()?.clear('snapshots')}catch{}location.reload()}catch(e){toast(e.message,true)}};document.getElementById('date').textContent=new Intl.DateTimeFormat('tr-TR',{dateStyle:'full',timeZone:'Europe/Istanbul'}).format(new Date());sync(true);setInterval(()=>{if(!authBlocked&&!document.hidden&&!busy&&!document.querySelector('dialog[open]')&&!['INPUT','SELECT'].includes(document.activeElement?.tagName))sync()},5000);window.addEventListener('focus',()=>sync());window.addEventListener('online',()=>{outboxRetryAt=0;sync(true)});window.addEventListener('offline',()=>setConnection(false));if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
 setInterval(()=>{document.querySelectorAll('[data-age-id]').forEach(el=>{const o=orders.find(o=>o.id===Number(el.dataset.ageId));if(o)el.textContent=age(o)+' dk'+(o.stage===4?' · tamamlandı':'')});document.querySelectorAll('[data-kitchen-age]').forEach(el=>el.textContent=tableDuration(age({created:Number(el.dataset.kitchenAge)})));document.querySelectorAll('[data-table-age]').forEach(el=>el.textContent=tableDuration(age({created:Number(el.dataset.opened)}))+' açık')},30000);
 
