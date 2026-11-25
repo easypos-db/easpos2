@@ -341,7 +341,7 @@
         var d=await res.json();
         if(Array.isArray(d.orders))ordersCache=d.orders;
         var list=Array.of(),seen=new Set();
-        (Array.isArray(d.members)?d.members:Array.of()).forEach(function(m){if(m.role==="courier"&&m.active!==0&&!seen.has(m.id)){seen.add(m.id);list.push({id:m.id,name:m.name})}});
+        (Array.isArray(d.people)?d.people:(Array.isArray(d.members)?d.members:Array.of())).forEach(function(m){if(m.role==="courier"&&m.active!==0&&!seen.has(m.id)){seen.add(m.id);list.push({id:m.id,name:m.name})}});
         (Array.isArray(d.roster)?d.roster:Array.of()).forEach(function(r){if(r.active!==0&&!seen.has(r.id)){seen.add(r.id);list.push({id:r.id,name:r.name})}});
         if(Array.isArray(d.couriers))d.couriers.forEach(function(c){if(!seen.has(c.id)){seen.add(c.id);list.push({id:c.id,name:c.name})}});
         couriersCache=list;
