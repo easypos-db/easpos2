@@ -80,7 +80,7 @@
       <strong class="pro-amount">${item.cost === null ? '—' : money(item.cost/100)}</strong></div>
       <p class="fine">${item.source === 'invoice' ? 'Adet maliyeti · KDV hariç' : 'Porsiyon maliyeti · PRO'}</p>
       ${item.cost === null ? `<p class="pro-review">${esc(item.reason)}</p>` : ''}
-      ${item.invoice ? `<details><summary>Fatura ayrıntısı</summary><p class="fine">${esc(item.invoice.date)} · ${esc(item.invoice.name)}<br>${item.invoice.price===null?'—':money(item.invoice.price/100)} / ${esc(item.invoice.unit)}${item.invoice.packageSize?' · '+item.invoice.packageSize+' adet':''}</p></details>` : ''}
+      ${item.invoice ? `<details><summary>Fatura ayrıntısı</summary><p class="fine">${esc(item.invoice.date)} · ${esc(item.invoice.name)}<br>${item.invoice.price===null?'—':money(item.invoice.price/100)} / ${esc(item.invoice.unit)}${item.invoice.packageSize?' · '+item.invoice.packageSize+' adet'+(item.invoice.packBasis?' ('+esc(item.invoice.packBasis)+')':''):''}</p></details>` : ''}
       ${item.lines.length ? `<details><summary>${item.lines.length} reçete bileşeni</summary><ul>${item.lines.map(line=>`<li><span>${esc(line.name)}${line.quantity===null?'':' · '+esc(line.quantity)}</span><span>${line.cost===null?'—':money(line.cost/100)}</span></li>`).join('')}</ul></details>` : ''}
     </article>`).join('') || '<p class="fine">Bu filtreye uyan ürün yok.</p>'}</div>` : ''}`;
   };

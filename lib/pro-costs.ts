@@ -11,18 +11,18 @@ const cents = (value: unknown): number | null =>
  typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1_000_000
   ? Math.round((value + Number.EPSILON) * 100) : null;
 
-const beverages = new Map<string, { name: RegExp; ambiguous?: RegExp }>([
+const beverages = new Map<string, { name: RegExp; pack?: number }>([
  ['cocacola', {name:/^coca[- ]cola\s+kutu.*330\s*ml/i}],
- ['cocacolazero', {name:/^(?:cc|coca[- ]cola)\s+zero.*330\s*ml/i}],
+ ['cocacolazero', {name:/^(?:cc|coca[- ]cola)\s+zero.*kutu.*330\s*ml/i,pack:24}],
  ['sprite', {name:/^(?:spr|sprite)\b.*(?:330|300)\s*ml/i}],
- ['fanta', {name:/^fanta\b.*(?:330|300)\s*ml/i}],
- ['fuseteaseftali', {name:/^ft\s+seft.*330\s*ml/i,ambiguous:/hibiskus/i}],
- ['fusetealimon', {name:/^ft\s+limon.*330\s*ml/i}],
- ['fuseteakarpuz', {name:/^ft\s+karpuz.*330\s*ml/i}],
- ['fuseteamango', {name:/^ft\s+man(?:-anns|go).*330\s*ml/i,ambiguous:/man-anns/i}],
+ ['fanta', {name:/^(?:fanta|fan)\b.*kutu.*330\s*ml/i,pack:24}],
+ ['fuseteaseftali', {name:/^ft\s+seft.*330\s*ml/i,pack:12}],
+ ['fusetealimon', {name:/^ft\s+limon.*kutu.*330\s*ml/i,pack:12}],
+ ['fuseteakarpuz', {name:/^ft\s+karpuz.*kutu.*330\s*ml/i,pack:12}],
+ ['fuseteamango', {name:/^ft\s+man(?:-anns|go).*kutu.*330\s*ml/i,pack:12}],
  ['ayran', {name:/^ayran\s+300\s*ml/i}],
  ['soda', {name:/^damla\s+mn[.\s]*sade.*200\s*ml/i}],
- ['su', {name:/^damla\s+su\b.*330\s*ml/i}],
+ ['su', {name:/^damla\s+su\s+owb.*330\s*ml/i,pack:12}],
 ]);
 
 export function summarizeProCosts(source: Source) {
@@ -45,12 +45,12 @@ export function summarizeProCosts(source: Source) {
   if (!row) return {id:product.id,cost:null,lines:[],source:'invoice',invoice:null,reason:'Uygun fatura satırı bulunamadı.'};
   const [date,,,name,,unit,price] = row;
   const label=String(name);
-  const packageSize = normalize(unit) === 'adet' ? 1 : Number(label.match(/\b1\s*[x×]\s*(\d{1,3})\b/i)?.[1] || 0);
-  const reason = beverage.ambiguous?.test(label) ? 'Faturadaki çeşit menüdeki adla doğrulanmalı.'
-   : !packageSize ? 'Koli içindeki adet faturada yazmıyor.'
+  const explicitPack = normalize(unit) === 'adet' ? 1 : Number(label.match(/1\s*[x×]\s*(\d{1,3})\b/i)?.[1] || 0);
+  const packageSize = explicitPack || (normalize(unit) === 'kutu' ? beverage.pack : 0) || 0;
+  const reason = !packageSize ? 'Koli içindeki adet doğrulanamadı.'
    : cents(price) === null ? 'Geçerli alış fiyatı bulunamadı.' : '';
   return {id:product.id,cost:reason ? null : cents(Number(price)/packageSize),lines:[],source:'invoice',
-   invoice:{date,name:label,price:cents(price),unit,packageSize},reason};
+   invoice:{date,name:label,price:cents(price),unit,packageSize,packBasis:explicitPack?'fatura':packageSize?'ürün ambalajı':null},reason};
  });
 }
 
