@@ -328,6 +328,24 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
   const result=await db.prepare("INSERT INTO orders (brand,platform,service_type,table_no,phone,customer,area,items,adjustments,note,subtotal,discount_type,discount_value,discount_amount,refund_total,payments,total,payment,stage,version,created,business_day,demo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'[]',?,?,?,?,?,?,0)").bind(brand,platform,serviceType,tableNo,phone,tableCustomer,serviceType==='table'?'Masa '+tableNo:area,JSON.stringify(lines),JSON.stringify(productNoteAdjustments),note,bill.subtotal,discountType,discountValue,bill.discountAmount,bill.total,payment,initialStage,1,now,day()).run();await db.prepare('INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)').bind(result.meta.last_row_id,me.id,'order_created',now,serviceType==='table'?'Masa '+tableNo+' siparişi oluşturuldu':serviceType==='pickup'?'Gel Al siparişi oluşturuldu':'Paket siparişi oluşturuldu').run();if(serviceType!=='table')await saveOrderCustomer(db,customer,phone,area);if(b.offlineState?.billRequested&&serviceType==='table')await db.prepare('UPDATE orders SET bill_requested=1 WHERE id=?').bind(result.meta.last_row_id).run();if(b.offlineState&&Array.isArray(b.offlineState.payments)){const pays=b.offlineState.payments.slice(0,40).filter((p:any)=>['Nakit','Kapıda kart','Kredi Kartı','Online','YS Online','Trendyol Online','Sodexo/Multinet','Açık Hesap (Cari)'].includes(p.method)&&Number.isSafeInteger(p.amount)&&p.amount>=0),paid=pays.reduce((n:number,p:any)=>n+p.amount,0);if(pays.length&&paid>=bill.total){const summary=[...new Set(pays.map((p:any)=>p.method))].join(' / ');await db.prepare('UPDATE orders SET payments=?,payment=?,stage=4,delivered=? WHERE id=?').bind(JSON.stringify(pays),summary,Date.now(),result.meta.last_row_id).run();const fresh=await db.prepare('SELECT * FROM orders WHERE id=?').bind(result.meta.last_row_id).first(),statements=await buildOrderCostStatements(db,fresh,me.id,Date.now());if(statements.length)await db.batch(statements)}}const savedOrder=await db.prepare('SELECT * FROM orders WHERE id=?').bind(result.meta.last_row_id).first();await enqueuePrint(db,savedOrder,'Mutfak');if(savedOrder.stage===4||savedOrder.service_type!=='table')await enqueuePrint(db,savedOrder,'Adisyon');return json({ok:true,id:result.meta.last_row_id,appended:false});
  }
  if(path==='/api/demo')err('Örnek sipariş özelliği kapatıldı. Yeni sipariş ekranını kullan.',410);
+ if(path==='/api/orders/assign-bulk'){
+  if(!admin)err('Toplu kurye ataması için yönetici yetkisi gerekiyor.',403);
+  const target=typeof b.courierId==='string'?b.courierId:'';
+  if(!target||!Array.isArray(b.orders)||!b.orders.length||b.orders.length>20)err('Kurye ve 1–20 hazır paket seç.');
+  const selected=b.orders as {id:number;version:number}[];
+  if(selected.some(item=>!Number.isSafeInteger(item?.id)||item.id<=0||!Number.isSafeInteger(item?.version)||item.version<=0)
+   ||new Set(selected.map(item=>item.id)).size!==selected.length)err('Paket seçimi geçersiz.');
+  const courier=await db.prepare("SELECT id FROM members WHERE id=? AND active=1 AND role='courier' UNION ALL SELECT id FROM courier_roster WHERE id=? AND active=1 AND id NOT IN (SELECT id FROM members)").bind(target,target).first();
+  if(!courier)err('Aktif bir kurye seç.');
+  const now=Date.now();
+  const ready="id=? AND version=? AND service_type='package' AND stage=2 AND COALESCE(courier_id,'')='' AND demo=0 AND merged_into IS NULL";
+  const results=await db.batch(selected.flatMap(item=>[
+   db.prepare("INSERT INTO events (order_id,actor,action,created,detail) SELECT id,?,'assign',?,'Paket toplu atamayla kuryeye ayrıldı' FROM orders WHERE "+ready).bind(me.id,now,item.id,item.version),
+   db.prepare('UPDATE orders SET courier_id=?,version=version+1 WHERE '+ready).bind(target,item.id,item.version),
+  ]));
+  const assigned=selected.filter((_,index)=>results[index*2+1].meta.changes===1).map(item=>item.id);
+  return json({assigned,skipped:selected.filter(item=>!assigned.includes(item.id)).map(item=>item.id)});
+ }
  if(path==='/api/orders/action'){
   if(!Number.isSafeInteger(b.id)||!Number.isSafeInteger(b.version))err('Geçersiz sipariş.');
   const o=await db.prepare('SELECT * FROM orders WHERE id=?').bind(b.id).first();if(!o)err('Sipariş bulunamadı.',404);
