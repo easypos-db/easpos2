@@ -222,14 +222,14 @@
       var mapUrl=o.area?buildMapUrl(o.area):"";
       var areaEl=card.querySelector(".area");
       if(areaEl&&mapUrl){
-        areaEl.innerHTML="<a href='"+mapUrl+"'  onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
+        areaEl.innerHTML="<a href='"+mapUrl+"'  onclick='event.stopPropagation();window.location.assign(this.href);return false;' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
       }
       if(o.phone){
         var telHref=normTel(o.phone);
         if(telHref&&!card.querySelector(".easy-tel-link")){
           var box=document.createElement("div");
           box.style.cssText="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap";
-          box.innerHTML="<a class='easy-tel-link' href='tel:"+telHref+"' onclick='event.stopPropagation()' style='display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>📞 "+o.phone+"</a>";
+          box.innerHTML="<a class='easy-tel-link' href='tel:"+telHref+"' onclick='event.stopPropagation();window.location.assign(this.href);return false;' style='display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>📞 "+o.phone+"</a>";
           var anchor=areaEl||card.querySelector(".payment");
           if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(box,anchor.nextSibling);
           else card.appendChild(box);
@@ -240,7 +240,7 @@
         if(printBtn&&mapUrl){
           var navA=document.createElement("a");
           navA.href=mapUrl; 
-          navA.setAttribute("onclick","event.stopPropagation()");
+          navA.setAttribute("onclick","event.stopPropagation();window.location.assign(this.href);return false;");
           navA.textContent="🧭 Konuma Git";
           navA.style.cssText="display:block;width:100%;text-align:center;margin-top:6px;padding:9px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-weight:700;font-size:13px;text-decoration:none;box-sizing:border-box";
           printBtn.replaceWith(navA);
