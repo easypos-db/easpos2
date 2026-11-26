@@ -254,7 +254,9 @@ async function handleCore(request:Request,db:any,env?:any){try{
  if(path==='/api/courier-deliveries'&&method==='GET'){
   if(!admin)err('Yönetici yetkisi gerekiyor.',403);
   const result=await db.prepare(`SELECT r.id,r.name,o.id AS orderId,o.delivered,o.delivery_location
-   FROM courier_roster r LEFT JOIN orders o ON o.id=(
+   FROM (SELECT id,name,active FROM members WHERE role='courier'
+         UNION ALL SELECT id,name,active FROM courier_roster WHERE id NOT IN (SELECT id FROM members)) r
+   LEFT JOIN orders o ON o.id=(
     SELECT id FROM orders WHERE service_type='package' AND stage=4 AND courier_id=r.id AND demo=0
     ORDER BY delivered DESC,id DESC LIMIT 1)
    WHERE r.active=1 ORDER BY r.name`).all();
