@@ -201,3 +201,5 @@
     anchor.parentNode.insertBefore(btn, anchor);
   }, 600);
 })();
+
+;(function(){if(window.__scFix)return;window.__scFix=true;var s=document.createElement("style");s.textContent=".board{display:grid!important;grid-template-columns:repeat(4,minmax(240px,1fr))!important;gap:12px!important;align-items:stretch!important}.column{height:calc(100vh - 295px)!important;min-height:380px!important;overflow-y:auto!important;padding-top:0!important}.column-title{position:sticky!important;top:0!important;z-index:10!important;background:#fff!important;padding:10px 8px!important;margin-top:0!important;border-bottom:1px solid #e2e8f0!important}";document.head.appendChild(s)})();
