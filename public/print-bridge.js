@@ -7,6 +7,10 @@ const exec=promisify(execFile),base=String(process.env.EASYPOS_URL||'').replace(
 if(!/^https:\/\//i.test(base)||!token){console.error('Set EASYPOS_URL and EASYPOS_BRIDGE_TOKEN before starting the bridge.');process.exit(2)}
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 const windows = process.platform === 'win32';
+// ESC B: two short beeps on compatible Ethernet thermal printers.
+const printAlert = process.env.EASYPOS_PRINT_BEEP === '0'
+  ? Buffer.alloc(0)
+  : Buffer.from([0x1b, 0x42, 0x02, 0x02]);
 
 async function printers() {
   try {
@@ -34,6 +38,7 @@ function printEthernet(job) {
   const ticket = Buffer.concat([
     Buffer.from([0x1b, 0x40]), // ESC @: initialize
     Buffer.from(job.content, 'utf8'),
+    printAlert,
   ]);
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host, port });
