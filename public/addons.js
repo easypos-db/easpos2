@@ -263,3 +263,30 @@
   }
   syncOrdersForLinks(); setInterval(syncOrdersForLinks,5000); setInterval(decorateLinks,400);
 })();
+
+;(function(){
+  if(window.__tySyncBtn)return; window.__tySyncBtn=true;
+  setInterval(function(){
+    var newPkgBtn=Array.from(document.querySelectorAll("button")).find(function(b){return (b.textContent||"").includes("Yeni paket siparişi")});
+    if(!newPkgBtn || document.getElementById("easyTySyncBtn"))return;
+    var btn=document.createElement("button");
+    btn.id="easyTySyncBtn"; btn.type="button";
+    btn.textContent="🟠 Trendyol Çek";
+    btn.style.cssText="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:8px 12px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;margin-right:8px";
+    btn.onclick=async function(){
+      btn.disabled=true; btn.textContent="🟠 Kontrol ediliyor...";
+      try{
+        var r=await fetch("api/integrations/trendyol/sync",{method:"POST",headers:{"Content-Type":"application/json"}});
+        var d=await r.json();
+        if(d.ok){
+          if(typeof toast==="function")toast("Trendyol: "+(d.fetched||0)+" paket tarandı, "+(d.imported||0)+" yeni sipariş alındı.");
+          if(d.imported>0)location.reload();
+        }else{
+          alert("Trendyol Yanıtı: "+(d.error||("HTTP "+d.status)));
+        }
+      }catch(e){alert("Hata: "+(e.message||e))}
+      btn.disabled=false; btn.textContent="🟠 Trendyol Çek";
+    };
+    newPkgBtn.parentNode.insertBefore(btn, newPkgBtn);
+  }, 600);
+})();
