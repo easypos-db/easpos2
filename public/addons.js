@@ -203,21 +203,25 @@
 })();
 
 ;(function(){if(window.__scFix)return;window.__scFix=true;var s=document.createElement("style");s.textContent=".board{display:grid!important;grid-template-columns:repeat(4,minmax(240px,1fr))!important;gap:12px!important;align-items:stretch!important}.column{height:calc(100vh - 295px)!important;min-height:380px!important;overflow-y:auto!important;padding-top:0!important}.column-title{position:sticky!important;top:0!important;z-index:10!important;background:#fff!important;padding:10px 8px!important;margin-top:0!important;border-bottom:1px solid #e2e8f0!important}";document.head.appendChild(s)})();
+
 ;(function(){
-  if(window.__courierNavTel)return; window.__courierNavTel=true;
+  if(window.__courierNavTelV2)return; window.__courierNavTelV2=true;
   var ordersList=Array.of();
   async function syncOrdersForLinks(){
     try{var r=await fetch("api/state",{headers:{Accept:"application/json"}});if(r.ok){var d=await r.json();if(Array.isArray(d.orders))ordersList=d.orders}}catch(e){}
   }
   function normTel(p){var d=String(p||"").replace(/\D/g,"");if(!d)return "";if(d.startsWith("90")&&d.length===12)return "+"+d;if(d.startsWith("0")&&d.length===11)return "+9"+d;if(d.length===10)return "+90"+d;return "+"+d}
+  function buildMapUrl(area){return "https://google.com"+encodeURIComponent(String(area||"").trim()+", İzmir")}
   function decorateLinks(){
+    var appTxt=(document.getElementById("app")&&document.getElementById("app").innerText)||"";
+    var isCourier=appTxt.includes("Kurye çalışma ekranı")||appTxt.includes("Hazır paket havuzu");
     document.querySelectorAll(".card.order-card-open[data-order-open], .card[data-order-open]").forEach(function(card){
-      if(card.dataset.navTelDone==="1")return;
+      if(card.dataset.navTelV2==="1")return;
       var oid=Number(card.getAttribute("data-order-open")),o=ordersList.find(function(x){return Number(x.id)===oid});
       if(!o)return;
+      var mapUrl=o.area?buildMapUrl(o.area):"";
       var areaEl=card.querySelector(".area");
-      if(areaEl&&o.area){
-        var mapUrl="https://google.com"+encodeURIComponent(o.area+", İzmir");
+      if(areaEl&&mapUrl){
         areaEl.innerHTML="<a href='"+mapUrl+"' target='_blank' rel='noopener' onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
       }
       if(o.phone){
@@ -225,14 +229,27 @@
         if(telHref&&!card.querySelector(".easy-tel-link")){
           var box=document.createElement("div");
           box.style.cssText="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap";
-          box.innerHTML="<a class='easy-tel-link' href='tel:"+telHref+"' onclick='event.stopPropagation()' style='display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>📞 "+o.phone+"</a>"+(o.area?"<a href='https://google.com"+encodeURIComponent(o.area+", İzmir")+"' target='_blank' rel='noopener' onclick='event.stopPropagation()' style='display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>🧭 Konuma Git</a>":"");
+          box.innerHTML="<a class='easy-tel-link' href='tel:"+telHref+"' onclick='event.stopPropagation()' style='display:inline-flex;align-items:center;gap:4px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none'>📞 "+o.phone+"</a>";
           var anchor=areaEl||card.querySelector(".payment");
           if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(box,anchor.nextSibling);
           else card.appendChild(box);
         }
       }
-      card.dataset.navTelDone="1";
+      if(isCourier){
+        var printBtn=Array.from(card.querySelectorAll("button")).find(function(b){return (b.textContent||"").trim()==="Fişi Yazdır"});
+        if(printBtn&&mapUrl){
+          var navA=document.createElement("a");
+          navA.href=mapUrl; navA.target="_blank"; navA.rel="noopener";
+          navA.setAttribute("onclick","event.stopPropagation()");
+          navA.textContent="🧭 Konuma Git";
+          navA.style.cssText="display:block;width:100%;text-align:center;margin-top:6px;padding:9px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-weight:700;font-size:13px;text-decoration:none;box-sizing:border-box";
+          printBtn.replaceWith(navA);
+        }else if(printBtn){
+          printBtn.remove();
+        }
+      }
+      card.dataset.navTelV2="1";
     });
   }
-  syncOrdersForLinks(); setInterval(syncOrdersForLinks,5000); setInterval(decorateLinks,450);
+  syncOrdersForLinks(); setInterval(syncOrdersForLinks,5000); setInterval(decorateLinks,400);
 })();
