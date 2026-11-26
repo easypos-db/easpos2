@@ -210,7 +210,7 @@
   async function syncOrdersForLinks(){
     try{var r=await fetch("api/state",{headers:{Accept:"application/json"}});if(r.ok){var d=await r.json();if(Array.isArray(d.orders))ordersList=d.orders}}catch(e){}
   }
-  function normTel(p){var d=String(p||"").replace(/\D/g,"");if(!d)return "";if(d.startsWith("90")&&d.length===12)return "+"+d;if(d.startsWith("0")&&d.length===11)return "+9"+d;if(d.length===10)return "+90"+d;return "+"+d}
+  function normTel(p){var d=String(p||"").replace(/\D/g,"");if(!d)return "";if(d.startsWith("90")&&d.length===12)return "+"+d;if(d.startsWith("0")&&d.length===11)return "+90"+d.slice(1);if(d.length===10)return "+90"+d;return "+"+d}
   function buildMapUrl(area){return "https://google.com"+encodeURIComponent(String(area||"").trim()+", İzmir")}
   function decorateLinks(){
     var appTxt=(document.getElementById("app")&&document.getElementById("app").innerText)||"";
@@ -222,7 +222,7 @@
       var mapUrl=o.area?buildMapUrl(o.area):"";
       var areaEl=card.querySelector(".area");
       if(areaEl&&mapUrl){
-        areaEl.innerHTML="<a href='"+mapUrl+"' target='_blank' rel='noopener' onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
+        areaEl.innerHTML="<a href='"+mapUrl+"'  onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
       }
       if(o.phone){
         var telHref=normTel(o.phone);
@@ -239,7 +239,7 @@
         var printBtn=Array.from(card.querySelectorAll("button")).find(function(b){return (b.textContent||"").trim()==="Fişi Yazdır"});
         if(printBtn&&mapUrl){
           var navA=document.createElement("a");
-          navA.href=mapUrl; navA.target="_blank"; navA.rel="noopener";
+          navA.href=mapUrl; 
           navA.setAttribute("onclick","event.stopPropagation()");
           navA.textContent="🧭 Konuma Git";
           navA.style.cssText="display:block;width:100%;text-align:center;margin-top:6px;padding:9px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-weight:700;font-size:13px;text-decoration:none;box-sizing:border-box";
