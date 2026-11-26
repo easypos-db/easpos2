@@ -266,27 +266,74 @@
 
 ;(function(){
   if(window.__tySyncBtn)return; window.__tySyncBtn=true;
-  setInterval(function(){
-    var newPkgBtn=Array.from(document.querySelectorAll("button")).find(function(b){return (b.textContent||"").includes("Yeni paket siparişi")});
-    if(!newPkgBtn || document.getElementById("easyTySyncBtn"))return;
-    var btn=document.createElement("button");
-    btn.id="easyTySyncBtn"; btn.type="button";
-    btn.textContent="🟠 Trendyol Çek";
-    btn.style.cssText="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;padding:8px 12px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;margin-right:8px";
-    btn.onclick=async function(){
-      btn.disabled=true; btn.textContent="🟠 Kontrol ediliyor...";
+  let syncing=false;
+  async function request(action,change){
+    let executor=sessionStorage.getItem("easyTyExecutor");
+    if(!executor){
+      executor=prompt("Trendyol işlemini yapan yetkilinin e-posta adresi");
+      if(!executor)throw Error("İşlem iptal edildi.");
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(executor))throw Error("Geçerli bir e-posta adresi girin.");
+      sessionStorage.setItem("easyTyExecutor",executor);
+    }
+    const response=await fetch("api/integrations/trendyol/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({executor,change})});
+    const data=await response.json();
+    if(!data.ok)throw Error([data.status?"Trendyol HTTP "+data.status:"EasyPOS HTTP "+response.status,data.error,data.summary].filter(Boolean).join(" · "));
+    return data;
+  }
+  async function sync(button,manual){
+    if(syncing)return;
+    syncing=true;button.disabled=true;
+    try{
+      const d=await request("sync");
+      const message="Trendyol HTTP "+d.status+" · "+d.fetched+" paket, "+d.imported+" yeni sipariş · "+d.summary;
+      button.title=message;
+      if(manual){sessionStorage.setItem("easyTyPolling",d.scheduled?"0":"1");alert(message)}
+    }catch(e){button.title=e.message;if(manual)alert(e.message)}
+    finally{syncing=false;button.disabled=false}
+  }
+  function panel(){
+    const dialog=document.createElement("dialog");
+    dialog.style.cssText="border:1px solid #d9dfe6;border-radius:16px;padding:22px;width:min(420px,90vw);color:#253348";
+    dialog.innerHTML='<form method="dialog"><button style="float:right" aria-label="Kapat">×</button></form><h2>Platform durumu</h2><label>Platform ve restoran <select style="width:100%;padding:10px;margin:12px 0"><option>Trendyol Yemek · Easy Wingy</option><option>Yemeksepeti · Easy Wingy</option><option>Yemeksepeti · Easy Macaroni</option></select></label><p role="status"></p><div class="ty-actions" style="display:flex;gap:8px"></div>';
+    document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
+    const select=dialog.querySelector("select"), info=dialog.querySelector("[role=status]"),buttons=[];
+    const labels={OPEN:"🟢 Açık",CLOSED:"🔴 Kapalı",BUSY:"🟡 Yoğun"};
+    async function refresh(change){
+      select.disabled=true;buttons.forEach(b=>b.disabled=true);
       try{
-        var r=await fetch("api/integrations/trendyol/sync",{method:"POST",headers:{"Content-Type":"application/json"}});
-        var d=await r.json();
-        if(d.ok){
-          if(typeof toast==="function")toast("Trendyol: "+(d.fetched||0)+" paket tarandı, "+(d.imported||0)+" yeni sipariş alındı.");
-          if(d.imported>0)location.reload();
-        }else{
-          alert("Trendyol Yanıtı: "+(d.error||("HTTP "+d.status)));
+        if(select.selectedIndex){info.textContent="Yemeksepeti şube bağlantısı kurulmadı.";return}
+        info.textContent="Trendyol yanıtı bekleniyor…";
+        const d=await request("status",change);info.textContent="Easy Wingy · "+(labels[d.state]||d.state);
+        buttons.forEach(b=>b.disabled=b.dataset.state===d.state);
+      }catch(e){info.textContent=e.message}
+      finally{select.disabled=false}
+    }
+    for(const [state,label] of Object.entries(labels)){
+      const b=document.createElement("button");b.textContent=label;b.dataset.state=state;
+      b.onclick=()=>{
+        const change={storeId:"201813",state};
+        if(state==="BUSY"){
+          const range=prompt("Normal teslimat aralığı kaç dakika? Örneğin 25-35. Yoğun modda her iki süreye 10 dakika eklenir.");
+          if(!range)return;
+          const match=range.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+          if(!match){info.textContent="Dakika aralığını 25-35 biçiminde girin.";return}
+          change.min=Number(match[1]);change.max=Number(match[2]);
         }
-      }catch(e){alert("Hata: "+(e.message||e))}
-      btn.disabled=false; btn.textContent="🟠 Trendyol Çek";
-    };
-    newPkgBtn.parentNode.insertBefore(btn, newPkgBtn);
-  }, 600);
+        refresh(change);
+      };
+      buttons.push(b);dialog.querySelector(".ty-actions").append(b);
+    }
+    select.onchange=()=>refresh();refresh();
+  }
+  setInterval(function(){
+    const anchor=Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("Yeni paket siparişi"));
+    if(!anchor||document.getElementById("easyTySyncBtn"))return;
+    const btn=document.createElement("button");btn.id="easyTySyncBtn";btn.textContent="🟠 Trendyol Çek";btn.onclick=()=>sync(btn,true);
+    const status=document.createElement("button");status.textContent="Platform durumu";status.onclick=panel;
+    anchor.before(status,btn);
+  },600);
+  setInterval(()=>{
+    const button=document.getElementById("easyTySyncBtn");
+    if(button&&sessionStorage.getItem("easyTyPolling")==="1")sync(button,false);
+  },30000);
 })();

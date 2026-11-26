@@ -30,3 +30,51 @@ test('username PIN authentication, reset revokes sessions, courier permissions r
 test('PIN login is throttled and cross-origin login is rejected',async()=>{const db=await setup();for(let i=0;i<5;i++)assert.equal((await request(db,'login',{username:'azat',pin:'000000'},null)).status,401);assert.equal((await request(db,'login',{username:'azat',pin:'000000'},null)).status,429);assert.equal((await request(db,'login',{username:'azat',pin:'000000'},null,'https://evil.test')).status,403)});
 
 test('menu-based example orders use server prices and reject a fabricated total or Trendyol price inference',async()=>{const db=await setup();const menu=await request(db,'menu');const soda=menu.products.find(p=>p.name==='Soda');const created=await request(db,'demo',{brand:'wingy',productId:soda.id,quantity:2,total:1});assert.equal(created.status,200);const o=(await request(db,'state')).orders.find(p=>p.id===created.id);assert.equal(o.total,140);assert.deepEqual(o.items,['2 × Soda']);assert.equal((await request(db,'demo',{productId:soda.id,quantity:1,platform:'Trendyol'})).status,400)});
+
+test('Easy Wingy accepts only pilot packages and queues each receipt once',async t=>{
+  const db=await setup();
+  const sync=()=>request(db,'integrations/trendyol/sync',{});
+  await sync(); // Initialize the integration settings before supplying test credentials.
+  db.db.prepare("UPDATE trendyol_config SET basic_token='test-token'").run();
+  for(const type of ['Mutfak','Adisyon'])
+    await request(db,'printers/manage',{action:'save',name:type,address:'test',types:[type],mainChannel:type});
+  const pkg={id:'test-package',supplierId:788216,storeId:201813,packageStatus:'Created',totalPrice:24,
+    lines:[{name:'Deneme ürünü',productId:72,unitSellingPrice:12,items:[{},{}]}]};
+  let accepted=false,allow=false;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    assert.equal(new URL(url).hostname,'api.tgoapis.com');
+    if(options.method==='PUT'){
+      assert.equal(new URL(url).pathname,'/integrator/order/meal/suppliers/788216/packages/picked');
+      assert.equal(JSON.parse(options.body).packageId,pkg.id);
+      accepted=allow;
+      return new Response('',{status:allow?200:403});
+    }
+    return Response.json({content:[{...pkg,id:'other',storeId:3},{...pkg,packageStatus:accepted?'Picking':'Created'}],totalPages:1});
+  });
+  assert.equal((await sync()).ok,false);
+  assert.equal(db.db.prepare('SELECT count(*) AS n FROM print_queue').get().n,0);
+  allow=true;
+  assert.equal((await sync()).imported,1);
+  assert.equal((await sync()).imported,0);
+  assert.deepEqual(db.db.prepare('SELECT printer_type FROM print_queue ORDER BY printer_type').all().map(r=>r.printer_type),['Adisyon','Mutfak']);
+  assert.equal(db.db.prepare('SELECT external_id FROM trendyol_products').get().external_id,'72');
+});
+
+test('Easy Wingy busy mode extends and restores the store delivery window',async t=>{
+  const db=await setup();
+  const status=(state,fields={})=>request(db,'integrations/trendyol/status',
+    state?{change:{storeId:'201813',state,...fields}}:{});
+  await status();
+  db.db.prepare("UPDATE trendyol_config SET basic_token='test-token'").run();
+  const writes=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    if(options.method==='GET')return Response.json({restaurants:[{id:201813,workingStatus:'OPEN',deliveryType:'STORE'}]});
+    writes.push([new URL(url).pathname.split('/').pop(),JSON.parse(options.body)]);
+    return Response.json({});
+  });
+  assert.equal((await status('BUSY',{min:25,max:35})).state,'BUSY');
+  assert.equal((await status()).state,'BUSY');
+  assert.equal((await status('OPEN')).state,'OPEN');
+  assert.equal((await status('CLOSED')).state,'CLOSED');
+  assert.deepEqual(writes,[['average-delivery-time',{min:35,max:45}],['average-delivery-time',{min:25,max:35}],['status',{status:'CLOSED'}]]);
+});

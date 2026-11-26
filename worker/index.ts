@@ -1,11 +1,18 @@
 import handler from "vinext/server/fetch-handler";
-import { archiveDailySales } from "../lib/api";
+import { archiveDailySales, syncTrendyolOrders } from "../lib/api";
 import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 const worker = {
   scheduled(controller: ScheduledController, env: Cloudflare.Env, ctx: ExecutionContext) {
     if (!env.DB) throw new Error("EasyPOS database binding is missing");
+    if(controller.cron === "* * * * *"){
+      const executor=(env as Cloudflare.Env & {TRENDYOL_EXECUTOR_EMAIL?:string}).TRENDYOL_EXECUTOR_EMAIL;
+      if(executor)ctx.waitUntil(syncTrendyolOrders(env.DB,env,executor).then(result=>{
+        if(!result.ok)throw new Error("Trendyol sipariş kontrolü başarısız: "+result.status);
+      }));
+      return;
+    }
     ctx.waitUntil(archiveDailySales(env.DB, controller.scheduledTime));
   },
   fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
