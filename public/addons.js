@@ -212,12 +212,11 @@
     try{var r=await fetch("api/state",{headers:{Accept:"application/json"}});if(r.ok){var d=await r.json();if(Array.isArray(d.orders))ordersList=d.orders}}catch(e){}
   }
   function normTel(p){
-    var d=String(p||"").replace(/\D/g,"");
-    if(!d)return "";
+    var d=String(p||"").split("").filter(function(c){return c>="0"&&c<="9"}).join("");
+    while(d.startsWith("0"))d=d.slice(1);
     if(d.startsWith("90")&&d.length===12)return "+"+d;
-    if(d.startsWith("0")&&d.length===11)return "+90"+d.slice(1);
     if(d.length===10)return "+90"+d;
-    return "+"+d;
+    return d?"+90"+d:"";
   }
   function buildMapUrl(area){
     var q=encodeURIComponent(String(area||"").trim()+", İzmir");
