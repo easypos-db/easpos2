@@ -175,7 +175,7 @@ async function syncTrendyolOrders(db:any, force=false){
   if(!force && now - Number(cfg.last_sync || 0) < 15000) return { ok: true, throttled: true };
   await db.prepare("UPDATE trendyol_config SET last_sync=? WHERE id=1").bind(now).run();
 
-  const url = `https://trendyol.com{encodeURIComponent(cfg.supplier_id)}/packages?storeId=${encodeURIComponent(cfg.store_id)}&size=50`;
+  const url = "https://trendyol.com" + encodeURIComponent(cfg.supplier_id) + "/packages?storeId=" + encodeURIComponent(cfg.store_id) + "&size=50";
   const headers = {
     "Authorization": "Basic " + cfg.basic_token,
     "User-Agent": `${cfg.supplier_id} - SelfIntegration`,
@@ -198,7 +198,7 @@ async function syncTrendyolOrders(db:any, force=false){
       if(rawSt.toLowerCase() === "cancelled" || rawSt.toLowerCase() === "delivered") continue;
       if(rawSt.toLowerCase() === "created" && pkg?.id){
         try {
-          await fetch(`https://trendyol.com{encodeURIComponent(cfg.supplier_id)}/packages/${encodeURIComponent(String(pkg.id))}/picked`, { method: "PUT", headers });
+          await fetch("https://trendyol.com" + encodeURIComponent(cfg.supplier_id) + "/packages/" + encodeURIComponent(String(pkg.id)) + "/picked", { method: "PUT", headers });
         } catch {}
       }
       const mapped = mapTrendyolPackage(pkg);
