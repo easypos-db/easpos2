@@ -83,6 +83,7 @@ const pilotSellerId='788216';
 function ensureTrendyolMapping(db:any){
  return db.batch([
   db.prepare('CREATE TABLE IF NOT EXISTS trendyol_pilot (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL)'),
+  db.prepare("INSERT OR IGNORE INTO trendyol_pilot (id,store_id) VALUES (1,'201813')"),
   db.prepare("CREATE TABLE IF NOT EXISTS trendyol_products (store_id TEXT NOT NULL, external_id TEXT NOT NULL, external_name TEXT NOT NULL, product_id TEXT, PRIMARY KEY(store_id,external_id))")
  ]);
 }
