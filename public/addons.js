@@ -211,7 +211,7 @@
     try{var r=await fetch("api/state",{headers:{Accept:"application/json"}});if(r.ok){var d=await r.json();if(Array.isArray(d.orders))ordersList=d.orders}}catch(e){}
   }
   function normTel(p){var d=String(p||"").replace(/\D/g,"");if(!d)return "";if(d.startsWith("90")&&d.length===12)return "+"+d;if(d.startsWith("0")&&d.length===11)return "+90"+d.slice(1);if(d.length===10)return "+90"+d;return "+"+d}
-  function buildMapUrl(area){return "https://google.com"+encodeURIComponent(String(area||"").trim()+", İzmir")}
+  function buildMapUrl(area){var q=encodeURIComponent(String(area||"").trim()+", İzmir");return /iPhone|iPad|iPod/i.test(navigator.userAgent)?("maps://?q="+q):("https://google.com"+q)}
   function decorateLinks(){
     var appTxt=(document.getElementById("app")&&document.getElementById("app").innerText)||"";
     var isCourier=appTxt.includes("Kurye çalışma ekranı")||appTxt.includes("Hazır paket havuzu");
