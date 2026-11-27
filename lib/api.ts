@@ -251,6 +251,15 @@ export async function syncTrendyolOrders(db:any,env:any,executor:string){
 }
 
 
+async function resolveTrendyolExecutor(db:any,env:any,email:string){
+  const configured=String(env?.TRENDYOL_EXECUTOR_EMAIL||'').trim()||String(email||'').trim();
+  if(configured)return configured;
+  try{
+    const row=await db.prepare("SELECT email FROM members WHERE role='admin' AND active=1 AND email LIKE '%@%' ORDER BY created LIMIT 1").first();
+    return String(row?.email||'').trim();
+  }catch{return '';}
+}
+
 async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:number, targetStage:number){
   const result={ok:true,packageId:'',sent:[] as number[],alreadySent:[] as number[],error:'',skipped:''};
   const log=async(action:string,detail:string)=>db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
@@ -266,7 +275,7 @@ async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:
     if(ext.platform!=="Trendyol"||!ext.external_id){result.ok=false;result.skipped='Trendyol packageId eşlemesi geçersiz.';await log('platform_sync_skip',result.skipped);return result}
     const pkgId=String(ext.external_id);
     result.packageId=pkgId;
-    const exec=String(env?.TRENDYOL_EXECUTOR_EMAIL||executor||"").trim();
+    const exec=await resolveTrendyolExecutor(db,env,executor);
     if(!exec){result.ok=false;result.skipped='Yetkili executor bulunamadı.';await log('platform_sync_skip','Trendyol durum bildirimi atlandı: yetkili executor bulunamadı.');return result}
     const steps:[number,string,any][]=[
       [2, tyOrderPath+"/invoiced", {packageId:pkgId}],
@@ -687,7 +696,8 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
    if(o.platform!=='Trendyol'||!['package','pickup'].includes(o.service_type))err('Yalnızca Trendyol paket veya Gel-Al siparişleri yeniden gönderilebilir.',409);
    if(o.stage<2)err('Sipariş henüz hazır aşamaya gelmedi.',409);
    await ensureOpsSchema(db);
-   const sync=await syncPlatformOrderStage(db,env,email||'',o.id,Number(o.stage));
+   const executor=await resolveTrendyolExecutor(db,env,email||'');
+   const sync=await syncPlatformOrderStage(db,env,executor,o.id,Number(o.stage));
    const summary=sync.ok
     ?`Trendyol durumları kontrol edildi. Gönderilen: ${sync.sent.length?sync.sent.join(', '):'yok'}; zaten kayıtlı: ${sync.alreadySent.length?sync.alreadySent.join(', '):'yok'}. Paket: ${sync.packageId||'bulunamadı'}.`
     :`Trendyol durumları tamamlanamadı. ${sync.skipped||sync.error||'Bilinmeyen hata'} Paket: ${sync.packageId||'bulunamadı'}.`;
