@@ -810,7 +810,7 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
   if(results[1].meta.changes!==1)err('Paket başka bir cihazda güncellendi. Yeniden dene.',409);if(a==='prepare'){const prepared=await db.prepare('SELECT * FROM orders WHERE id=?').bind(o.id).first();await enqueuePrint(db,prepared,'Mutfak')}
   const nextStage=a==='ready'?2:a==='depart'?3:a==='deliver'?4:0;
   if(nextStage)await syncPlatformOrderStage(db,env,email||"",o.id,nextStage);
-  if(set.includes('stage=4')){const statements=await buildOrderCostStatements(db,{...o,stage:4,delivered:ts},me.id,ts);if(statements.length)await db.batch(statements);const latest=await db.prepare('SELECT * FROM orders WHERE id=?').bind(o.id).first();await enqueuePrint(db,latest,'Adisyon')}
+  if(set.includes('stage=4')){const statements=await buildOrderCostStatements(db,{...o,stage:4,delivered:ts},me.id,ts);if(statements.length)await db.batch(statements);if(o.service_type==='table'){const latest=await db.prepare('SELECT * FROM orders WHERE id=?').bind(o.id).first();await enqueuePrint(db,latest,'Adisyon')}}
   return json({ok:true});
  }
  return json({error:'İşlem bulunamadı.'},404);
