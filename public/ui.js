@@ -610,20 +610,24 @@ function filteredPackageOrders(){const q=packageSearch.toLocaleLowerCase('tr');r
 function orderTable(a){return `<div class="tablewrap"><table><thead><tr><th>Teslim</th><th>#</th><th>Müşteri / adres</th><th>Marka</th><th>Platform</th><th>Kurye</th><th>Ürünler</th><th>İndirim</th><th>İade / Zayi</th><th>Net tutar</th><th>Ödeme detayları</th>${isAdmin()?'<th>İşlem</th>':''}</tr></thead><tbody>${a.map(o=>`<tr><td>${new Intl.DateTimeFormat('tr-TR',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Istanbul'}).format(new Date(o.delivered))}</td><td>${o.id}</td><td>${esc(o.customer)}<br><small>${esc(o.area)}</small></td><td>${brand(o.brand)}</td><td>${esc(o.platform)}</td><td>${esc(o.courierId?person(o.courierId):'—')}</td><td>${o.items.map((item,index)=>orderLineMarkup(o,item,index)).join('<br>')}</td><td>${o.discountAmount?`−${money(o.discountAmount)}`:'—'}</td><td>${o.refundTotal?money(o.refundTotal):'—'}</td><td>${money(o.reportTotal??o.total)}</td><td>${(o.payments||[]).map(p=>`${esc(p.method)} ${p.amount<0?'−':''}${money(Math.abs(p.amount))}${p.status==='receivable'?' · cari':''}`).join('<br>')||esc(o.payment)}</td>${isAdmin()?`<td>${o.platform==='Trendyol'&&['package','pickup'].includes(o.serviceType)?`<button type="button" data-platform-resync="${o.id}" data-order-version="${o.version}">Trendyol Durum Gönder</button>`:'—'}</td>`:''}</tr>`).join('')||`<tr><td colspan="${isAdmin()?12:11}">Bu aralıkta tamamlanan sipariş yok.</td></tr>`}</tbody></table></div>`}
 function printerConfig(){try{const value=JSON.parse(localStorage.getItem('easypos-printers')||'[]');if(Array.isArray(value))return value;return [{id:'legacy-cashier',name:value.cashier||'',types:value.cashier?['Adisyon']:[]},{id:'legacy-kitchen',name:value.kitchen||'',types:value.kitchen?['Mutfak']:[]}].filter(x=>x.name)}catch{return []}}
 let printerDevices=[],printerDiscovery=[],printerServiceState={bridgeReady:false,webhooks:[]};
-async function renderTrendyolMapping(){
+async function renderTrendyolMapping(selectedStoreId=''){
   const app=document.getElementById('app');
   if(!isAdmin())return;
-  app.innerHTML=`<div class="heading"><div><h2>Platform bağlantıları</h2><div class="sub">Trendyol Yemek · Easy Wingy · Yelki</div></div></div>
+  app.innerHTML=`<div class="heading"><div><h2>Platform bağlantıları</h2><div class="sub">Trendyol Yemek · Easy Wingy ve Easy Macaroni</div></div></div>
     <div id="trendyolMapping" class="section" aria-live="polite">Ürün eşleştirmeleri yükleniyor…</div>`;
   const panel=document.getElementById('trendyolMapping');
   try{
-    const {storeId,sellerId,external,menu}=await api('integrations/trendyol');
+    const query=selectedStoreId?'?storeId='+encodeURIComponent(selectedStoreId):'';
+    const {storeId,brand:storeBrand,sellerId,external,menu,stores=[]}=await api('integrations/trendyol'+query);
     if(!panel.isConnected)return;
     const options=menu.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
-    panel.innerHTML=`<h3>Easy Wingy pilotu</h3>
-      <p class="fine">Cari ID ${esc(sellerId)} · Trendyol bağlantısı ayrıca kurulmalıdır.</p>
-      <form id="trendyolStore" class="form-grid"><label>Easy Wingy restoran ID<input name="storeId" value="${esc(storeId)}" inputmode="numeric" pattern="[0-9]{1,20}" required></label>
+    const brandName=storeBrand==='mac'?'Easy Macaroni':'Easy Wingy';
+    panel.innerHTML=`<h3>Trendyol Yemek · ${esc(brandName)}</h3>
+      <p class="fine">Satıcı ID ${esc(sellerId)} · Aktif mağazalar platformdan alınır.</p>
+      <label>Restoran / marka<select id="trendyolStoreSelect" aria-label="Trendyol restoranı" style="max-width:420px">${stores.map(item=>`<option value="${esc(item.id)}" ${item.id===storeId?'selected':''}>${esc(item.name)} · ${item.brand==='mac'?'Easy Macaroni':'Easy Wingy'} (${esc(item.id)})</option>`).join('')}</select></label>
+      ${storeBrand==='wingy'?`<form id="trendyolStore" class="form-grid"><label>Easy Wingy restoran ID<input name="storeId" value="${esc(storeId)}" inputmode="numeric" pattern="[0-9]{1,20}" required></label>
         <div><button type="submit">Restoranı kaydet</button></div></form>
+      `:''}
       <hr><h3>Ürün eşleştirme</h3>
       <p class="fine">Eşleşmeyen ürünler, Trendyol’dan gelen ad ve adetle siparişe ve fişe eklenir.</p>
       ${storeId?`<form id="trendyolMap" class="form-grid">
@@ -634,18 +638,19 @@ async function renderTrendyolMapping(){
         <div class="toolbar"><input id="trendyolSearch" type="search" aria-label="Trendyol ürünlerini ara" placeholder="Trendyol ürün adı veya kodu"><select id="trendyolFilter" aria-label="Eşleşme durumu"><option value="all">Tüm ürünler</option><option value="unmapped">Eşleşmeyenler</option><option value="mapped">Eşleşenler</option></select></div>
         <div id="trendyolResults" class="tablewrap"></div>`:'<p>Ürün eklemek için önce restoran ID’yi kaydet.</p>'}
       <p id="trendyolStatus" role="status"></p>`;
+    panel.querySelector('#trendyolStoreSelect').onchange=event=>renderTrendyolMapping(event.target.value);
     const status=panel.querySelector('#trendyolStatus');
     const save=async(form,action)=>{
       const button=form.querySelector('button[type=submit]');
       button.disabled=true;
       try{
         await api('integrations/trendyol',{storeId,...Object.fromEntries(new FormData(form)),action});
-        if(panel.isConnected){toast(action==='store'?'Restoran kaydedildi.':'Ürün kaydedildi.');await renderTrendyolMapping()}
+        if(panel.isConnected){toast(action==='store'?'Restoran kaydedildi.':'Ürün kaydedildi.');await renderTrendyolMapping(action==='store'?(new FormData(form).get('storeId')||storeId):storeId)}
       }catch(error){status.textContent=error.message}
       finally{button.disabled=false}
     };
     const storeForm=panel.querySelector('#trendyolStore');
-    storeForm.onsubmit=event=>{event.preventDefault();save(storeForm,'store')};
+    if(storeForm)storeForm.onsubmit=event=>{event.preventDefault();save(storeForm,'store')};
     if(!storeId)return;
     const mapForm=panel.querySelector('#trendyolMap');
     mapForm.onsubmit=event=>{event.preventDefault();save(mapForm,'map')};

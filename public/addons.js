@@ -269,50 +269,49 @@
   if(window.__tySyncBtn)return; window.__tySyncBtn=true;
   let syncing=false;
   async function request(action,change){
-    let executor=sessionStorage.getItem("easyTyExecutor");
-    if(!executor){
-      executor=prompt("Trendyol işlemini yapan yetkilinin e-posta adresi");
-      if(!executor)throw Error("İşlem iptal edildi.");
-      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(executor))throw Error("Geçerli bir e-posta adresi girin.");
-      sessionStorage.setItem("easyTyExecutor",executor);
-    }
-    const response=await fetch("api/integrations/trendyol/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({executor,change})});
+    const response=await fetch("api/integrations/trendyol/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({change})});
     const data=await response.json();
     if(!data.ok)throw Error([data.status?"Trendyol HTTP "+data.status:"EasyPOS HTTP "+response.status,data.error,data.summary].filter(Boolean).join(" · "));
     return data;
   }
   async function sync(button,manual){
     if(syncing)return;
-    syncing=true;button.disabled=true;
+    syncing=true;if(button)button.disabled=true;
     try{
       const d=await request("sync");
-      const message="Trendyol HTTP "+d.status+" · "+d.fetched+" paket, "+d.imported+" yeni sipariş · "+d.summary;
-      button.title=message;
-      if(manual){sessionStorage.setItem("easyTyPolling",d.scheduled?"0":"1");alert(message)}
-    }catch(e){button.title=e.message;if(manual)alert(e.message)}
-    finally{syncing=false;button.disabled=false}
+      const storeSummary=(d.stores||[]).map(store=>store.name).join(", ");
+      const message="Trendyol HTTP "+d.status+" · "+d.fetched+" paket, "+d.imported+" yeni sipariş"+(storeSummary?" · "+storeSummary:"")+" · "+d.summary;
+      if(button)button.title=message;
+      if(manual)alert(message);
+    }catch(e){if(button)button.title=e.message;if(manual)alert(e.message)}
+    finally{syncing=false;if(button)button.disabled=false}
   }
   function panel(){
     const dialog=document.createElement("dialog");
     dialog.style.cssText="border:1px solid #d9dfe6;border-radius:16px;padding:22px;width:min(420px,90vw);color:#253348";
-    dialog.innerHTML='<form method="dialog"><button style="float:right" aria-label="Kapat">×</button></form><h2>Platform durumu</h2><label>Platform ve restoran <select style="width:100%;padding:10px;margin:12px 0"><option>Trendyol Yemek · Easy Wingy</option><option>Yemeksepeti · Easy Wingy</option><option>Yemeksepeti · Easy Macaroni</option></select></label><p role="status"></p><div class="ty-actions" style="display:flex;gap:8px"></div>';
+    dialog.innerHTML='<form method="dialog"><button style="float:right" aria-label="Kapat">×</button></form><h2>Platform durumu</h2><label>Trendyol restoranı <select style="width:100%;padding:10px;margin:12px 0"><option value="">Mağazalar yükleniyor…</option></select></label><p role="status"></p><div class="ty-actions" style="display:flex;gap:8px;flex-wrap:wrap"></div>';
     document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
     const select=dialog.querySelector("select"), info=dialog.querySelector("[role=status]"),buttons=[];
     const labels={OPEN:"🟢 Açık",CLOSED:"🔴 Kapalı",BUSY:"🟡 Yoğun"};
     async function refresh(change){
       select.disabled=true;buttons.forEach(b=>b.disabled=true);
       try{
-        if(select.selectedIndex){info.textContent="Yemeksepeti şube bağlantısı kurulmadı.";return}
         info.textContent="Trendyol yanıtı bekleniyor…";
-        const d=await request("status",change);info.textContent="Easy Wingy · "+(labels[d.state]||d.state);
-        buttons.forEach(b=>b.disabled=b.dataset.state===d.state);
+        const d=await request("status",change);
+        if(!select.options.length||!select.options[0].value){
+          select.replaceChildren(...(d.stores||[]).map(store=>new Option(store.name+" · "+(store.brand==="mac"?"Easy Macaroni":"Easy Wingy"),store.id)));
+        }
+        const current=(d.stores||[]).find(store=>store.id===select.value);
+        if(current){info.textContent=current.name+" · "+(labels[current.state]||current.state||"Durum bilinmiyor");buttons.forEach(b=>b.disabled=b.dataset.state===current.state)}
+        else info.textContent="Aktif Trendyol mağazası bulunamadı.";
       }catch(e){info.textContent=e.message}
       finally{select.disabled=false}
     }
     for(const [state,label] of Object.entries(labels)){
       const b=document.createElement("button");b.textContent=label;b.dataset.state=state;
       b.onclick=()=>{
-        const change={storeId:"201813",state};
+        const change={storeId:select.value,state};
+        if(!change.storeId){info.textContent="Önce Trendyol restoranını seçin.";return}
         if(state==="BUSY"){
           const range=prompt("Normal teslimat aralığı kaç dakika? Örneğin 25-35. Yoğun modda her iki süreye 10 dakika eklenir.");
           if(!range)return;
@@ -335,6 +334,6 @@
   },600);
   setInterval(()=>{
     const button=document.getElementById("easyTySyncBtn");
-    if(button&&sessionStorage.getItem("easyTyPolling")==="1")sync(button,false);
+    if(typeof me!=="undefined"&&me&&me.role==="admin"&&document.visibilityState==="visible")sync(button,false);
   },30000);
 })();

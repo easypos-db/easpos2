@@ -8,9 +8,15 @@ const worker = {
     if (!env.DB) throw new Error("EasyPOS database binding is missing");
     if(controller.cron === "* * * * *"){
       const executor=(env as Cloudflare.Env & {TRENDYOL_EXECUTOR_EMAIL?:string}).TRENDYOL_EXECUTOR_EMAIL;
-      if(executor)ctx.waitUntil(syncTrendyolOrders(env.DB,env,executor).then(result=>{
-        if(!result.ok)throw new Error("Trendyol sipariş kontrolü başarısız: "+result.status);
-      }));
+      ctx.waitUntil((async()=>{
+        const run=async()=>{
+          const result=await syncTrendyolOrders(env.DB,env,executor||"");
+          if(!result.ok)console.error("Trendyol sipariş kontrolü başarısız:",result.status||result.error||"bilinmeyen hata");
+        };
+        await run();
+        await new Promise(resolve=>setTimeout(resolve,30_000));
+        await run();
+      })());
       return;
     }
     ctx.waitUntil(archiveDailySales(env.DB, controller.scheduledTime));
