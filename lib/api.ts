@@ -139,7 +139,7 @@ function mapTrendyolPackage(pkg:any){
   const items = lines.flatMap((line:any) => {
     const quantity = Array.isArray(line.items) ? line.items.filter((x:any)=>!x.isCancelled).length : Number(line.quantity ?? 1);
     if(!quantity)return [];
-    return [{productId:line.productId,name:line.name,quantity,price:line.unitSellingPrice ?? line.price,
+    return [{productId:line.productId,name:line.name,quantity,price:line.price ?? line.unitSellingPrice,
       note:[line.note,...options(line)].filter(Boolean).join(", ")}];
   });
   const addr = pkg?.address || pkg?.shipmentAddress || {};
@@ -165,9 +165,28 @@ function mapTrendyolPackage(pkg:any){
     discount: (() => {
       const explicit = Number(pkg?.totalDiscount ?? pkg?.discountAmount ?? 0);
       if (explicit > 0) return explicit;
-      const seller = Number(pkg?.totalSellerDiscount ?? 0) + Number(pkg?.totalCouponAmount ?? 0);
+      let promoSum = 0;
+      for (const line of lines) {
+        const subLines = Array.isArray(line?.items) ? line.items.filter((item:any) => !item?.isCancelled) : [line];
+        for (const subLine of subLines) {
+          if (subLine?.coupon) {
+            const amount = Number(subLine.coupon?.amount?.seller ?? subLine.coupon?.sellerAmount ?? subLine.coupon?.amount?.total ?? subLine.coupon?.amount ?? 0);
+            if (amount > 0) promoSum += amount;
+          }
+          for (const promotion of subLine?.promotions || []) {
+            const amount = Number(promotion?.amount?.seller ?? promotion?.sellerAmount ?? promotion?.amount?.total ?? promotion?.amount ?? 0);
+            if (amount > 0) promoSum += amount;
+          }
+        }
+        for (const promotion of line?.promotions || []) {
+          const amount = Number(promotion?.amount?.seller ?? promotion?.sellerAmount ?? promotion?.amount?.total ?? promotion?.amount ?? 0);
+          if (amount > 0) promoSum += amount;
+        }
+      }
+      if (promoSum > 0) return Math.round(promoSum * 100) / 100;
+      const seller = Number(pkg?.totalSellerDiscount ?? 0) + Number(pkg?.totalCouponAmount ?? 0) + Number(pkg?.totalTrendyolDiscount ?? 0);
       if (seller > 0) return seller;
-      const gross = Number(pkg?.grossAmount ?? 0);
+      const gross = Number(pkg?.grossAmount ?? pkg?.totalGrossAmount ?? 0);
       const net = Number(pkg?.totalPrice ?? 0);
       return gross > net && net > 0 ? Math.round((gross - net) * 100) / 100 : 0;
     })(),
