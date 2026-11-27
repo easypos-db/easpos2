@@ -220,6 +220,38 @@ export async function syncTrendyolOrders(db:any,env:any,executor:string){
   return {ok:!failures.length,fetched:packages.length,imported,status:result.status,summary:result.summary,scheduled:!!env?.TRENDYOL_EXECUTOR_EMAIL,error:failures.slice(0,3).join(' / ')};
 }
 
+
+async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:number, targetStage:number){
+  try{
+    const ext=await db.prepare("SELECT platform,external_id FROM external_orders WHERE order_id=?").bind(orderId).first();
+    if(!ext||ext.platform!=="Trendyol"||!ext.external_id)return;
+    const pkgId=String(ext.external_id);
+    const exec=String(env?.TRENDYOL_EXECUTOR_EMAIL||executor||"").trim();
+    if(!exec)return;
+    const steps:[number,string,any][]=[
+      [2, tyOrderPath+"/invoiced", {packageId:pkgId}],
+      [3, tyOrderPath+"/"+encodeURIComponent(pkgId)+"/manual-shipped", {}],
+      [4, tyOrderPath+"/"+encodeURIComponent(pkgId)+"/manual-delivered", {}]
+    ];
+    for(const [st,path,body] of steps){
+      if(targetStage<st)continue;
+      const done=await db.prepare("SELECT 1 FROM events WHERE order_id=? AND action=? LIMIT 1").bind(orderId,"platform_sync_"+st).first();
+      if(done)continue;
+      const res=await mealRequest(db,env,exec,path,body);
+      if(res.ok){
+        await db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
+          .bind(orderId,"integration:Trendyol","platform_sync_"+st,Date.now(),"Trendyol durum bildirildi (aşama "+st+")").run();
+      }else{
+        await db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
+          .bind(orderId,"integration:Trendyol","platform_sync_err",Date.now(),("Trendyol aşama "+st+" HTTP "+res.status+" "+res.summary).slice(0,300)).run();
+        break;
+      }
+    }
+  }catch(e:any){
+    console.error("Platform stage sync error",e?.message||e);
+  }
+}
+
 async function platformStatus(db:any,env:any,executor:string,change:any){
   await db.prepare('CREATE TABLE IF NOT EXISTS meal_store_state (id TEXT PRIMARY KEY, state TEXT, restore_min INTEGER, restore_max INTEGER)').run();
   const row=await db.prepare('SELECT * FROM meal_store_state WHERE id=?').bind(TY_DEFAULT_STORE).first();
@@ -773,6 +805,8 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
    db.prepare(`UPDATE orders SET ${set},version=version+1 WHERE id=? AND version=?`).bind(...vals,o.id,b.version)
   ]);
   if(results[1].meta.changes!==1)err('Paket başka bir cihazda güncellendi. Yeniden dene.',409);if(a==='prepare'){const prepared=await db.prepare('SELECT * FROM orders WHERE id=?').bind(o.id).first();await enqueuePrint(db,prepared,'Mutfak')}
+  const nextStage=a==='ready'?2:a==='depart'?3:a==='deliver'?4:0;
+  if(nextStage)await syncPlatformOrderStage(db,env,email||"",o.id,nextStage);
   if(set.includes('stage=4')){const statements=await buildOrderCostStatements(db,{...o,stage:4,delivered:ts},me.id,ts);if(statements.length)await db.batch(statements);const latest=await db.prepare('SELECT * FROM orders WHERE id=?').bind(o.id).first();await enqueuePrint(db,latest,'Adisyon')}
   return json({ok:true});
  }
