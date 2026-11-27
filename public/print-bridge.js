@@ -3,24 +3,56 @@
 import { execFile, spawn } from 'node:child_process';
 import { createConnection, isIP } from 'node:net';
 import { promisify } from 'node:util';
-const exec=promisify(execFile),base=String(process.env.EASYPOS_URL||'').replace(/\/$/,''),token=process.env.EASYPOS_BRIDGE_TOKEN||'';
-if(!/^https:\/\//i.test(base)||!token){console.error('Set EASYPOS_URL and EASYPOS_BRIDGE_TOKEN before starting the bridge.');process.exit(2)}
-const delay=ms=>new Promise(r=>setTimeout(r,ms));
+import { buildCashierTicket, buildKitchenTicket } from './escpos-templates.js';
+
+const exec = promisify(execFile);
+const base = String(process.env.EASYPOS_URL || '').replace(/\/$/, '');
+const token = process.env.EASYPOS_BRIDGE_TOKEN || '';
+if (!/^https:\/\//i.test(base) || !token) {
+  console.error('Set EASYPOS_URL and EASYPOS_BRIDGE_TOKEN before starting the bridge.');
+  process.exit(2);
+}
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const windows = process.platform === 'win32';
-// ESC B: two short beeps on compatible Ethernet thermal printers.
 const printAlert = process.env.EASYPOS_PRINT_BEEP === '0'
   ? Buffer.alloc(0)
   : Buffer.from([0x1b, 0x42, 0x02, 0x02]);
+
+function buildTicketBuffer(job) {
+  const raw = String(job.content || '');
+  const marker = '\n__ESCPOS_JSON__:';
+  const idx = raw.indexOf(marker);
+  if (idx !== -1) {
+    try {
+      const payload = JSON.parse(raw.slice(idx + marker.length).trim());
+      const bName = payload.brand === 'mixed'
+        ? 'EASY WINGY x EASY MACARONI'
+        : payload.brand === 'mac'
+          ? 'EASY MACARONI'
+          : 'EASY WINGY';
+      const body = job.printer_type === 'Mutfak'
+        ? buildKitchenTicket(payload, { name: bName })
+        : buildCashierTicket(payload, { name: bName });
+      return Buffer.concat([body, printAlert]);
+    } catch {}
+  }
+  const fallbackText = idx !== -1 ? raw.slice(0, idx) : raw;
+  return Buffer.concat([
+    Buffer.from([0x1b, 0x40]),
+    Buffer.from(fallbackText, 'utf8'),
+    printAlert,
+  ]);
+}
 
 async function printers() {
   try {
     if (windows) {
       const command = '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Printer -ErrorAction Stop | ForEach-Object { $_.Name }';
       const { stdout } = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { timeout: 5000, windowsHide: true });
-      return stdout.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
+      return stdout.split(/\r?\n/).map((name) => name.trim()).filter(Boolean);
     }
     const { stdout } = await exec('lpstat', ['-p'], { timeout: 5000 });
-    return [...stdout.matchAll(/printer\s+([^\s]+)\s+/g)].map(match => match[1]);
+    return [...stdout.matchAll(/printer\s+([^\s]+)\s+/g)].map((match) => match[1]);
   } catch {
     return [];
   }
@@ -34,12 +66,7 @@ function printEthernet(job) {
   if (!host || !isIP(host) || port < 1 || port > 65535) {
     throw new Error('Geçersiz Ethernet yazıcı adresi: ' + address);
   }
-
-  const ticket = Buffer.concat([
-    Buffer.from([0x1b, 0x40]), // ESC @: initialize
-    Buffer.from(job.content, 'utf8'),
-    printAlert,
-  ]);
+  const ticket = buildTicketBuffer(job);
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host, port });
     socket.setTimeout(5000, () => socket.destroy(new Error('Yazıcı bağlantısı zaman aşımına uğradı.')));
@@ -55,9 +82,20 @@ function printEthernet(job) {
   });
 }
 
-async function report(names){try{await fetch(base+'/api/print-bridge/heartbeat',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({printers:names})})}catch{}}
-async function ack(id,ok,error=''){try{await fetch(base+'/api/print-queue',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id,ok,error})})}catch{}}
-async function print(job){return new Promise((resolve,reject)=>{const child=spawn('lp',['-d',job.printer_name,'-o','raw'],{stdio:['pipe','ignore','pipe']});let error='';child.stderr.on('data',chunk=>error+=chunk.toString());child.on('error',reject);child.on('close',code=>code===0?resolve():reject(new Error(error||'lp exited '+code)));child.stdin.end(job.content,'utf8')})}
+async function report(names) { try { await fetch(base + '/api/print-bridge/heartbeat', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ printers: names }) }); } catch {} }
+async function ack(id, ok, error = '') { try { await fetch(base + '/api/print-queue', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ok, error }) }); } catch {} }
+async function print(job) {
+  const buf = buildTicketBuffer(job);
+  return new Promise((resolve, reject) => {
+    const child = spawn('lp', ['-d', job.printer_name, '-o', 'raw'], { stdio: ['pipe', 'ignore', 'pipe'] });
+    let error = '';
+    child.stderr.on('data', (chunk) => (error += chunk.toString()));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(error || 'lp exited ' + code))));
+    child.stdin.end(buf);
+  });
+}
+
 console.log('EasyPOS Local Print Bridge started. Printer names and tokens are not logged.');
 while (true) {
   const detected = await printers();
