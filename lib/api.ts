@@ -175,7 +175,7 @@ async function mealRequest(db:any, env:any, executor:string, path:string, body?:
   if(!token)err('Cloudflare ayarlarına TRENDYOL_BASIC_TOKEN ekleyin.',503);
   if(!executor)err('Trendyol işlemleri için yetkili e-postasını girin.',422);
   const res=await fetch('https://api.tgoapis.com/integrator'+path,{
-    method:body?'PUT':'GET',redirect:'error',signal:AbortSignal.timeout(12000),
+    method:body?'PUT':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),
     headers:{Authorization:'Basic '+token,'User-Agent':'788216 - SelfIntegration',
       'x-agentname':env?.TRENDYOL_AGENT_NAME||'EasyPOS','x-executor-user':executor,'Content-Type':'application/json',Accept:'application/json'},
     body:body?JSON.stringify(body):undefined
