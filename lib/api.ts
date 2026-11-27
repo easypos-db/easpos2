@@ -252,6 +252,7 @@ export async function syncTrendyolOrders(db:any,env:any,executor:string){
 
 
 async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:number, targetStage:number){
+  const result={ok:true,packageId:'',sent:[] as number[],alreadySent:[] as number[],error:'',skipped:''};
   const log=async(action:string,detail:string)=>db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
     .bind(orderId,"integration:Trendyol",action,Date.now(),detail.slice(0,350)).run();
   let currentStep=targetStage;
@@ -259,13 +260,14 @@ async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:
     const ext=await db.prepare("SELECT platform,external_id FROM external_orders WHERE order_id=?").bind(orderId).first();
     if(!ext){
       const order=await db.prepare('SELECT platform FROM orders WHERE id=?').bind(orderId).first();
-      if(order?.platform==='Trendyol')await log('platform_sync_skip','Trendyol eşlemesi yok: external_orders kaydı bulunamadı.');
-      return;
+      if(order?.platform==='Trendyol'){result.ok=false;result.skipped='external_orders kaydı bulunamadı.';await log('platform_sync_skip','Trendyol eşlemesi yok: external_orders kaydı bulunamadı.')}
+      return result;
     }
-    if(ext.platform!=="Trendyol"||!ext.external_id)return;
+    if(ext.platform!=="Trendyol"||!ext.external_id){result.ok=false;result.skipped='Trendyol packageId eşlemesi geçersiz.';await log('platform_sync_skip',result.skipped);return result}
     const pkgId=String(ext.external_id);
+    result.packageId=pkgId;
     const exec=String(env?.TRENDYOL_EXECUTOR_EMAIL||executor||"").trim();
-    if(!exec){await log('platform_sync_skip','Trendyol durum bildirimi atlandı: yetkili executor bulunamadı.');return;}
+    if(!exec){result.ok=false;result.skipped='Yetkili executor bulunamadı.';await log('platform_sync_skip','Trendyol durum bildirimi atlandı: yetkili executor bulunamadı.');return result}
     const steps:[number,string,any][]=[
       [2, tyOrderPath+"/invoiced", {packageId:pkgId}],
       [3, tyOrderPath+"/"+encodeURIComponent(pkgId)+"/manual-shipped", null],
@@ -275,19 +277,23 @@ async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:
       currentStep=st;
       if(targetStage<st)continue;
       const done=await db.prepare("SELECT 1 FROM events WHERE order_id=? AND action=? LIMIT 1").bind(orderId,"platform_sync_"+st).first();
-      if(done)continue;
+      if(done){result.alreadySent.push(st);continue}
       const res=await mealRequest(db,env,exec,path,body,'PUT');
       if(res.ok){
+        result.sent.push(st);
         await log("platform_sync_"+st,"Trendyol HTTP "+res.status+"; aşama "+st+" bildirildi. Yanıt: "+(res.summary||'boş'));
       }else{
+        result.ok=false;result.error='Aşama '+st+' HTTP '+res.status+' '+res.summary;
         await log("platform_sync_err","Trendyol aşama "+st+" HTTP "+res.status+" "+res.summary);
         break;
       }
     }
   }catch(e:any){
-    try{await log('platform_sync_err','Trendyol aşama '+currentStep+' isteği başarısız: '+String(e?.message||e))}catch{}
+    result.ok=false;result.error='Aşama '+currentStep+' isteği başarısız: '+String(e?.message||e);
+    try{await log('platform_sync_err','Trendyol '+result.error)}catch{}
     console.error("Platform stage sync error",e?.message||e);
   }
+  return result;
 }
 
 async function platformStatus(db:any,env:any,executor:string,change:any){
@@ -676,7 +682,18 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
   const o=await db.prepare('SELECT * FROM orders WHERE id=?').bind(b.id).first();if(!o)err('Sipariş bulunamadı.',404);
   if(o.version!==b.version)err('Bu paket başka bir cihazda güncellendi. Liste yenilendi; tekrar kontrol et.',409);
   const a=b.action,ts=Date.now();let set='',vals:any[]=[],detail='';
-  if(a==='order_edit'){
+  if(a==='platform_resync'){
+   if(!admin)err('Trendyol durumunu yeniden göndermek için yönetici yetkisi gerekir.',403);
+   if(o.platform!=='Trendyol'||!['package','pickup'].includes(o.service_type))err('Yalnızca Trendyol paket veya Gel-Al siparişleri yeniden gönderilebilir.',409);
+   if(o.stage<2)err('Sipariş henüz hazır aşamaya gelmedi.',409);
+   await ensureOpsSchema(db);
+   const sync=await syncPlatformOrderStage(db,env,email||'',o.id,Number(o.stage));
+   const summary=sync.ok
+    ?`Trendyol durumları kontrol edildi. Gönderilen: ${sync.sent.length?sync.sent.join(', '):'yok'}; zaten kayıtlı: ${sync.alreadySent.length?sync.alreadySent.join(', '):'yok'}. Paket: ${sync.packageId||'bulunamadı'}.`
+    :`Trendyol durumları tamamlanamadı. ${sync.skipped||sync.error||'Bilinmeyen hata'} Paket: ${sync.packageId||'bulunamadı'}.`;
+   await db.prepare('INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)').bind(o.id,me.id,'platform_resync',ts,summary.slice(0,350)).run();
+   return json({ok:sync.ok,packageId:sync.packageId,sent:sync.sent,alreadySent:sync.alreadySent,error:sync.error,skipped:sync.skipped});
+  }else if(a==='order_edit'){
    if(!admin)err('Sipariş düzenleme için yönetici yetkisi gerekir.',403);
    if(!['package','pickup'].includes(o.service_type)||o.stage>=4)err('Yalnızca açık Paket veya Gel-Al siparişleri düzenlenebilir.',409);
    if(!Array.isArray(b.items)||b.items.length<1||b.items.length>75)err('Sepete en az bir ürün ekle.');

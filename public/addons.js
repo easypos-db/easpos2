@@ -219,8 +219,7 @@
     return d?"+90"+d:"";
   }
   function buildMapUrl(area){
-    var q=encodeURIComponent(String(area||"").trim()+", İzmir");
-    return /iPhone|iPad|iPod/i.test(navigator.userAgent)?("maps://?q="+q):("https://google.com"+q);
+    return String(area||"").trim()?"#":"";
   }
   function decorateLinks(){
     var appTxt=(document.getElementById("app")&&document.getElementById("app").innerText)||"";
@@ -229,10 +228,10 @@
       if(card.dataset.navTelV3==="1")return;
       var oid=Number(card.getAttribute("data-order-open")),o=ordersList.find(function(x){return Number(x.id)===oid});
       if(!o)return;
-      var mapUrl=o.area?buildMapUrl(o.area):"";
+      var mapUrl=o.area?buildMapUrl(o.area):"", mapAddress=String(o.area||"").trim();
       var areaEl=card.querySelector(".area");
       if(areaEl&&mapUrl){
-        areaEl.innerHTML="<a href='"+mapUrl+"' onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
+        areaEl.innerHTML="<a href='"+mapUrl+"' data-easy-map-link data-easy-map-address='"+mapAddress.replace(/&/g,"&amp;").replace(/'/g,"&#39;")+"' onclick='event.stopPropagation()' style='color:#0369a1;text-decoration:underline;font-weight:600;display:inline-flex;align-items:center;gap:4px'>📍 "+areaEl.textContent.trim()+"</a>";
       }
       if(o.phone){
         var telHref=normTel(o.phone);
@@ -250,6 +249,8 @@
         if(printBtn&&mapUrl){
           var navA=document.createElement("a");
           navA.href=mapUrl;
+          navA.setAttribute("data-easy-map-link","");
+          navA.setAttribute("data-easy-map-address",mapAddress);
           navA.setAttribute("onclick","event.stopPropagation()");
           navA.textContent="🧭 Konuma Git";
           navA.style.cssText="display:block;width:100%;text-align:center;margin-top:6px;padding:9px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-weight:700;font-size:13px;text-decoration:none;box-sizing:border-box";
