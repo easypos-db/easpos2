@@ -162,7 +162,15 @@ function mapTrendyolPackage(pkg:any){
       address: fullAddr || String(pkg?.deliveryAddress || "Trendyol Adres")
     },
     note: String(pkg?.customerNote || pkg?.orderNote || pkg?.note || ""),
-    discount: Number(pkg?.totalDiscount ?? pkg?.discountAmount ?? 0),
+    discount: (() => {
+      const explicit = Number(pkg?.totalDiscount ?? pkg?.discountAmount ?? 0);
+      if (explicit > 0) return explicit;
+      const seller = Number(pkg?.totalSellerDiscount ?? 0) + Number(pkg?.totalCouponAmount ?? 0);
+      if (seller > 0) return seller;
+      const gross = Number(pkg?.grossAmount ?? 0);
+      const net = Number(pkg?.totalPrice ?? 0);
+      return gross > net && net > 0 ? Math.round((gross - net) * 100) / 100 : 0;
+    })(),
     total: Number(pkg?.totalPrice ?? pkg?.grossAmount ?? 0),
     items
   };
@@ -321,9 +329,10 @@ const printStatements=printTypes.flatMap((type,index)=>{
  if(!printer)return [];
  const ticket=safeTicketText({id:'__ORDER_ID__',brand,service_type:'package',created:now,items:JSON.stringify(lines),
   adjustments:JSON.stringify(notes),payment,subtotal:bill.subtotal,discount_amount:bill.discountAmount,total:paymentAmount,customer,phone,area:address},type==='Mutfak');
- const placeholder='__ORDER_ID__', marker=ticket.indexOf(placeholder);
- return [db.prepare("INSERT INTO print_queue (id,order_id,printer_type,printer_name,content,status,created_at) SELECT ?,order_id,?,?,? || order_id || ?,'pending',? FROM external_orders WHERE platform=? AND external_id=?")
-  .bind(crypto.randomUUID(),type,printer.name,ticket.slice(0,marker),ticket.slice(marker+placeholder.length),now,platform,externalId)];
+ const parts=ticket.split('__ORDER_ID__');
+ const sqlExpr=parts.map(()=>'?').join(' || order_id || ');
+ return [db.prepare(`INSERT INTO print_queue (id,order_id,printer_type,printer_name,content,status,created_at) SELECT ?,order_id,?,?,${sqlExpr},'pending',? FROM external_orders WHERE platform=? AND external_id=?`)
+  .bind(crypto.randomUUID(),type,printer.name,...parts,now,platform,externalId)];
 });
 let id:number;
 try{
