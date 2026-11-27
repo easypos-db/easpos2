@@ -1,7 +1,7 @@
 # Standalone Cloudflare Worker config for the built EasyPOS app.
 # Replace database_id with the EasyPOS D1 database ID in your Cloudflare account.
 # The hosted Sites deployment manages its own binding and does not read this placeholder.
-name = "easypos"
+name = "easpos2"
 main = "./dist/server/index.js"
 compatibility_date = "2026-05-15"
 #compatibility_flags = ["nodejs_compat"]
