@@ -69,7 +69,7 @@ const formatOrderItem=(quantity:number,name:string,unit:number)=>quantity+' × '
 function productNoteText(entry:any,fallback:any){const values=[entry?.productNote,entry?.product_note,entry?.itemNote,entry?.item_note,entry?.specialInstructions,entry?.special_instructions,entry?.comment,entry?.note,entry?.notes,fallback];for(const value of values){const text=typeof value==='string'?value:typeof value?.note==='string'?value.note:typeof value?.product_note==='string'?value.product_note:typeof value?.comment==='string'?value.comment:typeof value?.text==='string'?value.text:Array.isArray(value)?value.map((x:any)=>typeof x==='string'?x:typeof x?.note==='string'?x.note:typeof x?.text==='string'?x.text:'').filter(Boolean).join(' · '):'';if(text.trim())return text.trim().slice(0,320)}return ''}
 function calculateBill(items:string[],adjustments:any[],discountType:string,discountValue:number){const subtotal=items.reduce((sum,item,index)=>{const rows=adjustments.filter((a:any)=>a.index===index),terminal=rows.some((a:any)=>['cancelled','refunded','comp','paid'].includes(a.status));if(terminal)return sum;const line=parseOrderItem(item);if(!line)return sum;const deductions=rows.filter((a:any)=>['item_discount','partial_paid'].includes(a.status)).reduce((n:number,a:any)=>n+Math.max(0,Number(a.amount)||0),0);return sum+Math.max(0,line.quantity*line.unit-deductions)},0);const discountAmount=discountType==='percent'?Math.min(subtotal,Math.round(subtotal*discountValue/10000)):discountType==='amount'?Math.min(subtotal,discountValue):0;return {subtotal,discountAmount,total:subtotal-discountAmount}}
 async function ensureOpsSchema(db:any){let pending=opsSchemaReady.get(db);if(!pending){pending=(async()=>{await db.batch([db.prepare('CREATE TABLE IF NOT EXISTS printer_devices (id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL DEFAULT \'\',types TEXT NOT NULL DEFAULT \'[]\',main_channel TEXT NOT NULL DEFAULT \'\',active INTEGER NOT NULL DEFAULT 1,updated_at INTEGER NOT NULL,last_seen INTEGER)'),db.prepare('CREATE TABLE IF NOT EXISTS printer_discovery (name TEXT PRIMARY KEY,last_seen INTEGER NOT NULL)'),db.prepare('CREATE TABLE IF NOT EXISTS print_queue (id TEXT PRIMARY KEY,order_id INTEGER,printer_type TEXT NOT NULL,printer_name TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL DEFAULT \'pending\',created_at INTEGER NOT NULL,claimed_at INTEGER,completed_at INTEGER,error TEXT)'),db.prepare('CREATE INDEX IF NOT EXISTS print_queue_status_created_idx ON print_queue(status,created_at)'),db.prepare('CREATE TABLE IF NOT EXISTS print_bridge_tokens (id TEXT PRIMARY KEY,token_hash TEXT NOT NULL,created_at INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0)'),db.prepare('CREATE TABLE IF NOT EXISTS webhook_tokens (platform TEXT PRIMARY KEY,token_hash TEXT NOT NULL,updated_at INTEGER NOT NULL)'),db.prepare('CREATE TABLE IF NOT EXISTS external_orders (platform TEXT NOT NULL,external_id TEXT NOT NULL,order_id INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(platform,external_id))'),db.prepare('CREATE TABLE IF NOT EXISTS request_idempotency (request_id TEXT PRIMARY KEY,response_json TEXT NOT NULL,status INTEGER NOT NULL,created_at INTEGER NOT NULL)')])})();opsSchemaReady.set(db,pending)}await pending}
-function safeTicketText(order:any,kitchen=false){const lines=['================================',order.brand==='mixed'?'EASY WINGY / EASY MACARONI':order.brand==='mac'?'EASY MACARONI':'EASY WINGY',(kitchen?'MUTFAK FİŞİ':'KASA / KURYE FİŞİ')+' · #'+order.id,'Tarih: '+new Date(order.created||Date.now()).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul'}),'Tür: '+(order.service_type==='table'?'Masa '+order.table_no:order.service_type==='pickup'?'Gel-Al':'Paket Servis'),'--------------------------------'];let items:any[]=[];try{items=JSON.parse(order.items||'[]')}catch{}let adjustments:any[]=[];try{adjustments=JSON.parse(order.adjustments||'[]')}catch{}for(const [index,item] of items.entries()){const line=parseOrderItem(item);if(!line)continue;lines.push(`${line.quantity} x ${line.name}${kitchen?'':' · '+(line.quantity*line.unit/100).toFixed(2)+' TL'}`);const note=adjustments.find((a:any)=>a.index===index&&a.status==='product_note')?.note;if(note)lines.push('  NOT: '+String(note).slice(0,180))}if(!kitchen){lines.push('--------------------------------','Ödeme: '+String(order.payment||'—'),'Ara Toplam: '+(safeNumber(order.subtotal||order.total)/100).toFixed(2)+' TL');if(safeNumber(order.discount_amount)>0)lines.push('İndirim: -'+(safeNumber(order.discount_amount)/100).toFixed(2)+' TL');lines.push('NET TOPLAM: '+(safeNumber(order.total)/100).toFixed(2)+' TL');if(order.service_type==='package')lines.push('Müşteri: '+String(order.customer||'').slice(0,80),'Telefon: '+String(order.phone||'').slice(0,30),'Adres: '+String(order.area||'').slice(0,180))}lines.push('================================','\n\n');
+function safeTicketText(order:any,kitchen=false){const lines=['================================',order.brand==='mixed'?'EASY WINGY / EASY MACARONI':order.brand==='mac'?'EASY MACARONI':'EASY WINGY',(kitchen?'MUTFAK FİŞİ':'KASA / KURYE FİŞİ')+' · #'+order.id,'Tarih: '+new Date(order.created||Date.now()).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul'}),'Tür: '+(order.service_type==='table'?'Masa '+order.table_no:order.service_type==='pickup'?'Gel-Al':'Paket Servis'),...(order.platform&&order.platform!=='Restoran'?['Kanal: '+String(order.platform).toLocaleUpperCase('tr-TR')]:[]),'--------------------------------'];let items:any[]=[];try{items=JSON.parse(order.items||'[]')}catch{}let adjustments:any[]=[];try{adjustments=JSON.parse(order.adjustments||'[]')}catch{}for(const [index,item] of items.entries()){const line=parseOrderItem(item);if(!line)continue;lines.push(`${line.quantity} x ${line.name}${kitchen?'':' · '+(line.quantity*line.unit/100).toFixed(2)+' TL'}`);const note=adjustments.find((a:any)=>a.index===index&&a.status==='product_note')?.note;if(note)lines.push('  NOT: '+String(note).slice(0,180))}if(!kitchen){lines.push('--------------------------------','Ödeme: '+String(order.payment||'—'),'Ara Toplam: '+(safeNumber(order.subtotal||order.total)/100).toFixed(2)+' TL');if(safeNumber(order.discount_amount)>0)lines.push('İndirim: -'+(safeNumber(order.discount_amount)/100).toFixed(2)+' TL');lines.push('NET TOPLAM: '+(safeNumber(order.total)/100).toFixed(2)+' TL');if(order.service_type==='package')lines.push('Müşteri: '+String(order.customer||'').slice(0,80),'Telefon: '+String(order.phone||'').slice(0,30),'Adres: '+String(order.area||'').slice(0,180))}lines.push('================================','\n\n');
 const structItems=items.map((item,index)=>{const line=parseOrderItem(item);if(!line)return null;const note=adjustments.find((a:any)=>a.index===index&&a.status==='product_note')?.note||'';return {qty:line.quantity,name:line.name,price:line.unit/100,total:(line.quantity*line.unit)/100,note};}).filter(Boolean);
 const escposPayload={orderNo:order.id,brand:order.brand||'wingy',channel:(order.platform&&order.platform!=='Restoran'?order.platform:(order.service_type==='table'?'Masa '+order.table_no:order.service_type==='pickup'?'Gel Al':'Paket Servis')),createdAt:order.created||Date.now(),paymentType:String(order.payment||'—'),customerName:String(order.customer||''),phone:String(order.phone||''),address:String(order.area||''),note:String(order.note||''),items:structItems,subtotal:safeNumber(order.subtotal||order.total)/100,discount:safeNumber(order.discount_amount)/100,total:safeNumber(order.total)/100};
 return lines.join('\n')+'\n__ESCPOS_JSON__:'+JSON.stringify(escposPayload);}
@@ -198,14 +198,14 @@ function mapTrendyolPackage(pkg:any){
 const tyOrderPath='/order/meal/suppliers/788216/packages';
 const tyStoresPath='/store/meal/suppliers/788216/stores';
 
-async function mealRequest(db:any, env:any, executor:string, path:string, body?:any){
+async function mealRequest(db:any, env:any, executor:string, path:string, body?:any, method?:string){
   await ensureTrendyolConfig(db);
   const cfg=await db.prepare('SELECT * FROM trendyol_config WHERE id=1').first();
   const token=env?.TRENDYOL_BASIC_TOKEN || cfg?.basic_token;
   if(!token)err('Cloudflare ayarlarına TRENDYOL_BASIC_TOKEN ekleyin.',503);
   if(!executor)err('Trendyol işlemleri için yetkili e-postasını girin.',422);
   const res=await fetch('https://api.tgoapis.com/integrator'+path,{
-    method:body!==undefined?'PUT':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),
+    method:method|| (body!==undefined?'PUT':'GET'),redirect:'manual',signal:AbortSignal.timeout(12000),
     headers:{Authorization:'Basic '+token,'User-Agent':'788216 - SelfIntegration',
       'x-agentname':env?.TRENDYOL_AGENT_NAME||'EasyPOS','x-executor-user':executor,'Content-Type':'application/json',Accept:'application/json'},
     body:body&&typeof body==='object'?JSON.stringify(body):undefined
@@ -252,32 +252,40 @@ export async function syncTrendyolOrders(db:any,env:any,executor:string){
 
 
 async function syncPlatformOrderStage(db:any, env:any, executor:string, orderId:number, targetStage:number){
+  const log=async(action:string,detail:string)=>db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
+    .bind(orderId,"integration:Trendyol",action,Date.now(),detail.slice(0,350)).run();
+  let currentStep=targetStage;
   try{
     const ext=await db.prepare("SELECT platform,external_id FROM external_orders WHERE order_id=?").bind(orderId).first();
-    if(!ext||ext.platform!=="Trendyol"||!ext.external_id)return;
+    if(!ext){
+      const order=await db.prepare('SELECT platform FROM orders WHERE id=?').bind(orderId).first();
+      if(order?.platform==='Trendyol')await log('platform_sync_skip','Trendyol eşlemesi yok: external_orders kaydı bulunamadı.');
+      return;
+    }
+    if(ext.platform!=="Trendyol"||!ext.external_id)return;
     const pkgId=String(ext.external_id);
     const exec=String(env?.TRENDYOL_EXECUTOR_EMAIL||executor||"").trim();
-    if(!exec)return;
+    if(!exec){await log('platform_sync_skip','Trendyol durum bildirimi atlandı: yetkili executor bulunamadı.');return;}
     const steps:[number,string,any][]=[
       [2, tyOrderPath+"/invoiced", {packageId:pkgId}],
       [3, tyOrderPath+"/"+encodeURIComponent(pkgId)+"/manual-shipped", null],
       [4, tyOrderPath+"/"+encodeURIComponent(pkgId)+"/manual-delivered", null]
     ];
     for(const [st,path,body] of steps){
+      currentStep=st;
       if(targetStage<st)continue;
       const done=await db.prepare("SELECT 1 FROM events WHERE order_id=? AND action=? LIMIT 1").bind(orderId,"platform_sync_"+st).first();
       if(done)continue;
-      const res=await mealRequest(db,env,exec,path,body);
+      const res=await mealRequest(db,env,exec,path,body,'PUT');
       if(res.ok){
-        await db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
-          .bind(orderId,"integration:Trendyol","platform_sync_"+st,Date.now(),"Trendyol durum bildirildi (aşama "+st+")").run();
+        await log("platform_sync_"+st,"Trendyol HTTP "+res.status+"; aşama "+st+" bildirildi. Yanıt: "+(res.summary||'boş'));
       }else{
-        await db.prepare("INSERT INTO events (order_id,actor,action,created,detail) VALUES (?,?,?,?,?)")
-          .bind(orderId,"integration:Trendyol","platform_sync_err",Date.now(),("Trendyol aşama "+st+" HTTP "+res.status+" "+res.summary).slice(0,300)).run();
+        await log("platform_sync_err","Trendyol aşama "+st+" HTTP "+res.status+" "+res.summary);
         break;
       }
     }
   }catch(e:any){
+    try{await log('platform_sync_err','Trendyol aşama '+currentStep+' isteği başarısız: '+String(e?.message||e))}catch{}
     console.error("Platform stage sync error",e?.message||e);
   }
 }
@@ -340,14 +348,14 @@ for(const [index,entry] of entries.entries()){
  const note=productNoteText(entry,null).replace(/[\x00-\x08\x0b-\x1f\x7f]/g,' ');
  if(note)notes.push({index,status:'product_note',note,source:'platform',created:now});
 }
-const brand=trendyol?'wingy':brands.size>1?'mixed':brands.values().next().value||'wingy' ,customer=String(payload?.customer?.name??payload?.customerName??payload?.customer_name??payload?.name??'Online Müşteri').trim().slice(0,90),phone=String(payload?.customer?.phone??payload?.phone??'').slice(0,30),address=String(payload?.customer?.address??payload?.address??payload?.deliveryAddress??payload?.delivery_address??'').slice(0,240),note=String(payload?.note??payload?.orderNote??payload?.order_note??'').slice(0,500),discount=Math.max(0,Math.round(safeNumber(payload?.discount??payload?.discountAmount??payload?.discount_amount)*100)),bill=calculateBill(lines,notes,'amount',Math.min(discount,calculateBill(lines,notes,'none',0).subtotal)),payment=trendyol&&payload.onDelivery?'Kapıda Ödeme':platform==='Trendyol'?'Trendyol Online':'YS Online',paymentAmount=Math.round(safeNumber(payload?.total??payload?.totalPrice??payload?.total_price)*100)||bill.total;const insert=db.prepare("INSERT INTO orders (brand,platform,service_type,table_no,phone,customer,area,items,adjustments,note,subtotal,discount_type,discount_value,discount_amount,refund_total,payments,total,payment,stage,version,created,business_day,demo) VALUES (?,?, 'package',NULL,?,?,?,?,?,?,?,?,?,?,0,?,?,?,1,1,?,?,0)").bind(brand,platform,phone,customer,address,JSON.stringify(lines),JSON.stringify(notes),note,bill.subtotal,'amount',bill.discountAmount,bill.discountAmount,JSON.stringify(trendyol&&payload.onDelivery?[]:[{method:payment,amount:paymentAmount,status:'paid',created:now}]),Math.max(0,paymentAmount),payment,now,day());
+const brand=trendyol?'wingy':brands.size>1?'mixed':brands.values().next().value||'wingy' ,customer=String(payload?.customer?.name??payload?.customerName??payload?.customer_name??payload?.name??'Online Müşteri').trim().slice(0,90),phone=String(payload?.customer?.phone??payload?.phone??'').slice(0,30),address=String(payload?.customer?.address??payload?.address??payload?.deliveryAddress??payload?.delivery_address??'').slice(0,240),note=String(payload?.note??payload?.orderNote??payload?.order_note??'').slice(0,500),discount=Math.max(0,Math.round(safeNumber(payload?.discount??payload?.discountAmount??payload?.discount_amount)*100)),bill=calculateBill(lines,notes,'amount',Math.min(discount,calculateBill(lines,notes,'none',0).subtotal)),payment=trendyol&&payload.onDelivery?'Kapıda Ödeme':platform==='Trendyol'?'Trendyol Online':'YS Online',paymentAmount=bill.discountAmount>0?bill.total:(Math.round(safeNumber(payload?.total??payload?.totalPrice??payload?.total_price)*100)||bill.total);const insert=db.prepare("INSERT INTO orders (brand,platform,service_type,table_no,phone,customer,area,items,adjustments,note,subtotal,discount_type,discount_value,discount_amount,refund_total,payments,total,payment,stage,version,created,business_day,demo) VALUES (?,?, 'package',NULL,?,?,?,?,?,?,?,?,?,?,0,?,?,?,1,1,?,?,0)").bind(brand,platform,phone,customer,address,JSON.stringify(lines),JSON.stringify(notes),note,bill.subtotal,'amount',bill.discountAmount,bill.discountAmount,JSON.stringify(trendyol&&payload.onDelivery?[]:[{method:payment,amount:paymentAmount,status:'paid',created:now}]),Math.max(0,paymentAmount),payment,now,day());
 const printTypes=['Mutfak',trendyol?'Adisyon':'Kurye'];
 const printers=await Promise.all(printTypes.map(type=>findTicketPrinter(db,type)));
 const printStatements=printTypes.flatMap((type,index)=>{
  const printer=printers[index];
  if(!printer)return [];
  const ticket=safeTicketText({id:'__ORDER_ID__',brand,service_type:'package',created:now,items:JSON.stringify(lines),
-  adjustments:JSON.stringify(notes),payment,subtotal:bill.subtotal,discount_amount:bill.discountAmount,total:paymentAmount,customer,phone,area:address},type==='Mutfak');
+  adjustments:JSON.stringify(notes),payment,platform,subtotal:bill.subtotal,discount_amount:bill.discountAmount,total:paymentAmount,customer,phone,area:address},type==='Mutfak');
  const parts=ticket.split('__ORDER_ID__');
  const sqlExpr=parts.map(()=>'?').join(' || order_id || ');
  return [db.prepare(`INSERT INTO print_queue (id,order_id,printer_type,printer_name,content,status,created_at) SELECT ?,order_id,?,?,${sqlExpr},'pending',? FROM external_orders WHERE platform=? AND external_id=?`)
@@ -676,10 +684,16 @@ if(action==='product_save'){const id=String(b.id||crypto.randomUUID()),name=Stri
    if(priorAdjustments.some((x:any)=>!['product_note','kitchen_ready'].includes(x.status))||JSON.parse(o.payments||'[]').some((x:any)=>x.scope==='items'))err('Ürün bazlı ödeme veya düzeltme bulunan sipariş bu ekrandan düzenlenemez.');
    await ensureMenuSchema(db);const menuRows=(await db.prepare('SELECT id,name,category,ys_price AS ysPrice,brand,vat_rate AS vatRate,active FROM menu_products').all()).results||[],saved=(await db.prepare('SELECT product_id,ys_price FROM product_prices').all()).results||[],priceMap=new Map(saved.map((p:any)=>[p.product_id,p.ys_price]));
    const items:string[]=[],notes:any[]=[],selectedBrands=new Set<string>();
+   const linkedExternal=await db.prepare("SELECT 1 FROM external_orders WHERE order_id=? AND platform='Trendyol'").bind(o.id).first();
    for(const [index,entry] of b.items.entries()){
     const product=menuRows.find((p:any)=>p.id===entry?.id),quantity=entry?.quantity;
-    if(!product||!Number.isInteger(quantity)||quantity<1||quantity>50)err('Sepette geçersiz ürün veya adet var.');
-    const unit=Number(priceMap.get(product.id)??product.ysPrice);items.push(formatOrderItem(quantity,product.name,unit));selectedBrands.add(product.brand);
+    if(!Number.isInteger(quantity)||quantity<1||quantity>50)err('Sepette geçersiz ürün veya adet var.');
+    let itemName:string,unit:number;
+    if(product){itemName=product.name;unit=Number(priceMap.get(product.id)??product.ysPrice);selectedBrands.add(product.brand)}
+    else if(linkedExternal&&entry?.customLine===true&&typeof entry?.name==='string'&&entry.name.trim()&&Number.isSafeInteger(entry.unitPrice)&&entry.unitPrice>=0&&entry.unitPrice<=100000000){
+     itemName=entry.name.replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,200);unit=entry.unitPrice;selectedBrands.add('wingy');
+    }else err('Sepette geçersiz ürün veya adet var.');
+    items.push(formatOrderItem(quantity,itemName,unit));
     const note=String(entry.productNote||'').trim().slice(0,320);if(note)notes.push({index,status:'product_note',note,source:'manual',created:ts,actor:me.id});
    }
    const customer=String(b.customer||'').trim().slice(0,90),phone=String(b.phone||'').trim().slice(0,30),area=String(b.area||'').trim().slice(0,240),note=String(b.note||'').trim().slice(0,500);
