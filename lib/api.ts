@@ -61,6 +61,11 @@ export async function archiveDailySales(db:any,time=Date.now()) {
    COALESCE((SELECT SUM(refund_total) FROM closed),0), ?
   FROM ledger
  `).bind(start,start+86400000,date,time).run();
+ await db.prepare("CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY,name TEXT NOT NULL,phone TEXT NOT NULL UNIQUE,address TEXT NOT NULL DEFAULT '',balance INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL)").run();
+ await db.batch([
+  db.prepare("UPDATE orders SET customer='Müşteri #' || id,phone='',area='' WHERE stage=4 AND delivered>=? AND delivered<?").bind(start,start+86400000),
+  db.prepare('DELETE FROM customers WHERE balance=0 AND updated_at<?').bind(start+86400000),
+ ]);
 }
 
 function orderRow(o:any){const items=JSON.parse(o.items),adjustments=JSON.parse(o.adjustments||'[]'),productNotes=adjustments.filter((a:any)=>a.status==='product_note').map((a:any)=>({index:a.index,note:a.note,source:a.source||'manual',created:a.created})),savedPayments=JSON.parse(o.payments||'[]'),platform=o.platform||'Restoran',fallbackMethod=o.payment==='Online'||o.payment==='Online Ödeme'?(platform==='Trendyol'?'Trendyol Online':platform==='Yemeksepeti'?'YS Online':o.payment):o.payment;const payments=savedPayments.length?savedPayments.map((p:any)=>({...p,method:p.method||fallbackMethod,amount:safeNumber(p.amount)/100})):o.stage===4?[{method:fallbackMethod,amount:safeNumber(o.total)/100,status:o.payment==='Açık Hesap'?'receivable':'paid',created:o.delivered||o.created}]:[];return {id:o.id,brand:o.brand,platform,serviceType:o.service_type||'package',tableNo:o.table_no||null,billRequested:!!o.bill_requested,paidItemTotal:safeNumber(o.paid_item_total)/100,reportTotal:(safeNumber(o.total)+safeNumber(o.paid_item_total))/100,mergedInto:o.merged_into||null,phone:o.phone||'',customer:o.customer,area:o.area,items,adjustments,productNotes,subtotal:safeNumber(o.subtotal||o.total)/100,discountType:o.discount_type||'none',discountValue:safeNumber(o.discount_value)/100,discountAmount:safeNumber(o.discount_amount)/100,refundTotal:safeNumber(o.refund_total)/100,payments,note:o.note,total:safeNumber(o.total)/100,payment:o.payment,stage:safeNumber(o.stage),courierId:o.courier_id,version:safeNumber(o.version),created:safeNumber(o.created),departed:safeNumber(o.departed),delivered:safeNumber(o.delivered),demo:!!o.demo}}
@@ -639,7 +644,7 @@ async function handleCore(request:Request,db:any,env?:any){try{
   await ensureDailyReportSchema(db);
   const now=Date.now(),yesterday=reportDayAt(now-86400000);
   const currentMidnight=Date.parse(reportDayAt(now)+'T00:00:00+03:00');
-  if(now-currentMidnight>=600000&&!await db.prepare('SELECT 1 FROM daily_sales_reports WHERE day=?').bind(yesterday).first())await archiveDailySales(db,now);
+  if(now-currentMidnight>=600000)await archiveDailySales(db,now);
   const reports=(await db.prepare('SELECT day,orders_count,net_sales,net_received,receivable,refunds,generated_at FROM daily_sales_reports ORDER BY day DESC').all()).results||[];
   return json({reports});
  }
