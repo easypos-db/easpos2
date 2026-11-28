@@ -280,7 +280,7 @@
     try{
       const d=await request("sync");
       const storeSummary=(d.stores||[]).map(store=>store.name).join(", ");
-      const message="Trendyol HTTP "+d.status+" · "+d.fetched+" paket, "+d.imported+" yeni sipariş"+(storeSummary?" · "+storeSummary:"")+" · "+d.summary;
+      const message="Trendyol HTTP "+d.status+" · "+d.fetched+" paket, "+d.imported+" yeni sipariş"+(storeSummary?" · "+storeSummary:"")+" · "+d.summary+(d.warnings?" · "+d.warnings:"");
       if(button)button.title=message;
       if(manual)alert(message);
     }catch(e){if(button)button.title=e.message;if(manual)alert(e.message)}
@@ -288,48 +288,63 @@
   }
   function panel(){
     const dialog=document.createElement("dialog");
-    dialog.style.cssText="border:1px solid #d9dfe6;border-radius:16px;padding:22px;width:min(420px,90vw);color:#253348";
-    dialog.innerHTML='<form method="dialog"><button style="float:right" aria-label="Kapat">×</button></form><h2>Platform durumu</h2><label>Trendyol restoranı <select style="width:100%;padding:10px;margin:12px 0"><option value="">Mağazalar yükleniyor…</option></select></label><p role="status"></p><div class="ty-actions" style="display:flex;gap:8px;flex-wrap:wrap"></div>';
+    dialog.className="easy-integration-center";
+    dialog.innerHTML='<style>.easy-integration-center{width:min(900px,94vw);max-width:none;max-height:90vh;overflow:auto;border:1px solid rgba(255,255,255,.72);border-radius:22px;padding:26px;background:rgba(255,255,255,.91);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);color:#253348;box-shadow:0 24px 80px #17203338}.easy-integration-center::backdrop{background:rgba(25,35,48,.35);backdrop-filter:blur(5px)}.easy-integration-head{display:flex;justify-content:space-between;align-items:center}.easy-integration-head h2{margin:0}.easy-integration-refresh{display:flex;justify-content:space-between;align-items:center;margin:18px 0;padding:14px 18px;border:1px solid #e3e7ed;border-radius:14px;background:#f8fafc}.easy-integration-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}.easy-integration-card{border:1px solid #e2e7ee;border-radius:16px;padding:18px;background:#fff}.easy-integration-card h3{margin:0 0 8px}.easy-integration-counts{display:flex;gap:16px;font-weight:700}.easy-integration-counts .on{color:#27934e}.easy-integration-counts .off{color:#d83a3a}.easy-integration-change{margin:12px 0}.easy-integration-platform{margin-top:18px;border-top:1px solid #e7ebf0;padding-top:14px}.easy-integration-platform-head,.easy-integration-row{display:flex;align-items:center;gap:12px}.easy-integration-platform-head{justify-content:space-between;padding:8px 2px}.easy-integration-row{padding:11px 4px;border-top:1px solid #edf0f4}.easy-integration-row .label{flex:1}.easy-integration-dot{width:10px;height:10px;border-radius:50%;background:#20a454;flex:none}.easy-integration-dot.off{background:#df3434}.easy-integration-dot.unknown{background:#a0a8b4}.easy-integration-choices{display:flex;gap:6px;flex-wrap:wrap}.easy-integration-choices button{padding:6px 9px;font-size:12px}.easy-integration-note{color:#7a8594;font-size:12px}.easy-integration-footer{display:flex;justify-content:flex-end;margin-top:20px}@media(max-width:620px){.easy-integration-center{padding:18px}.easy-integration-cards{grid-template-columns:1fr}.easy-integration-row{align-items:flex-start;flex-wrap:wrap}.easy-integration-row .label{min-width:65%}}</style><div class="easy-integration-head"><div><h2>Entegrasyon Durumları</h2><div class="easy-integration-note">Platform ve marka sipariş alım durumları</div></div><form method="dialog"><button aria-label="Kapat">×</button></form></div><div class="easy-integration-refresh"><div><strong>Entegrasyon Yenilenme Süresi</strong><div id="easyTyCountdown" class="easy-integration-note">30 sn</div></div><button type="button" id="easyTyRefreshNow" aria-label="Şimdi yenile">⟳ Yenile</button></div><div id="easyTySummary" class="easy-integration-cards"></div><button type="button" class="easy-integration-change" id="easyTyChangeToggle">Durumları Değiştir</button><div id="easyTyManage" hidden></div><p id="easyTyStatus" role="status" class="easy-integration-note"></p><div class="easy-integration-footer"><form method="dialog"><button class="primary">Kapat</button></form></div>';
     document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();
-    const select=dialog.querySelector("select"), info=dialog.querySelector("[role=status]"),buttons=[];
-    const labels={OPEN:"🟢 Açık",CLOSED:"🔴 Kapalı",BUSY:"🟡 Yoğun"};
-    async function refresh(change){
-      select.disabled=true;buttons.forEach(b=>b.disabled=true);
-      try{
-        info.textContent="Trendyol yanıtı bekleniyor…";
-        const d=await request("status",change);
-        if(!select.options.length||!select.options[0].value){
-          select.replaceChildren(...(d.stores||[]).map(store=>new Option(store.name+" · "+(store.brand==="mac"?"Easy Macaroni":"Easy Wingy"),store.id)));
-        }
-        const current=(d.stores||[]).find(store=>store.id===select.value);
-        if(current){info.textContent=current.name+" · "+(labels[current.state]||current.state||"Durum bilinmiyor");buttons.forEach(b=>b.disabled=b.dataset.state===current.state)}
-        else info.textContent="Aktif Trendyol mağazası bulunamadı.";
-      }catch(e){info.textContent=e.message}
-      finally{select.disabled=false}
+    const summary=dialog.querySelector("#easyTySummary"),manage=dialog.querySelector("#easyTyManage"),info=dialog.querySelector("#easyTyStatus"),countdown=dialog.querySelector("#easyTyCountdown"),refreshButton=dialog.querySelector("#easyTyRefreshNow");
+    const labels={OPEN:"Açık",CLOSED:"Kapalı",BUSY:"Yoğun",UNCONFIGURED:"Token gerekli"};
+    let latest=null,remaining=30,refreshing=false;
+    const statusText=value=>labels[value]||value||"Bilinmiyor";
+    const stateClass=value=>value==="OPEN"||value==="BUSY"?"on":value==="CLOSED"?"off":"unknown";
+    const esc=value=>String(value||"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+    function render(data){
+      latest=data;const accounts=data.accounts||[],tyRows=accounts.flatMap(account=>account.stores||[]),configuredRows=tyRows.filter(row=>row.configured),active=configuredRows.filter(row=>row.state==="OPEN"||row.state==="BUSY").length,passive=configuredRows.filter(row=>row.state==="CLOSED").length,unknown=configuredRows.length-active-passive;
+      summary.innerHTML='<section class="easy-integration-card"><h3>Trendyol Yemek</h3><div class="easy-integration-counts"><span class="on">'+active+' Aktif</span><span class="off">'+passive+' Pasif</span></div>'+(unknown?'<div class="easy-integration-note">'+unknown+' şubenin durumu bilinmiyor.</div>':'')+'</section><section class="easy-integration-card"><h3>Yemeksepeti</h3><div class="easy-integration-counts"><span class="easy-integration-note">Durum bilgisi alınamıyor</span></div><div class="easy-integration-note">Şube durum API bağlantısı yapılandırılmamış.</div></section>';
+      const tyRowsMarkup=accounts.map(account=>{
+        const rows=account.stores?.length?account.stores:[{id:"",supplierId:account.supplierId,brand:account.brand,name:account.name,state:"UNCONFIGURED",configured:false}];
+        return '<div class="easy-integration-platform"><div class="easy-integration-platform-head"><strong>Trendyol Yemek · '+esc(account.name)+' ('+esc(account.supplierId)+')</strong><button type="button" data-ty-bulk="'+esc(account.supplierId)+'" '+(!account.configured?'disabled':'')+'>Tümünü Aç/Kapa</button></div>'+rows.map((row,index)=>'<div class="easy-integration-row"><i class="easy-integration-dot '+stateClass(row.state)+'"></i><span class="label">'+esc(row.name||account.name)+' · '+statusText(row.state)+(row.configured?'':' · Token gerekli')+'</span><button type="button" data-ty-change="'+esc(account.supplierId)+'|'+esc(row.id)+'" '+(!row.configured?'disabled':'')+'>Değiştir</button><div class="easy-integration-choices" data-ty-choices="'+esc(account.supplierId)+'|'+esc(row.id)+'" hidden><button type="button" data-ty-state="OPEN">🟢 Açık</button><button type="button" data-ty-state="BUSY">🟡 Yoğun</button><button type="button" data-ty-state="CLOSED">🔴 Kapalı</button></div></div>').join('')+'</div>';
+      }).join('');
+      const ysRows=['Easy Wingy','Easy Macaroni'].map(name=>'<div class="easy-integration-row"><i class="easy-integration-dot unknown"></i><span class="label">'+name+' · Durum bağlantısı yok</span><button type="button" disabled>Değiştir</button></div>').join('');
+      manage.innerHTML=tyRowsMarkup+'<div class="easy-integration-platform"><div class="easy-integration-platform-head"><strong>Yemeksepeti</strong><button type="button" disabled>Tümünü Aç/Kapa</button></div>'+ysRows+'</div>';
+      if(data.errors?.length)info.textContent=data.errors.join(" · ");else info.textContent="Durumlar güncellendi.";
     }
-    for(const [state,label] of Object.entries(labels)){
-      const b=document.createElement("button");b.textContent=label;b.dataset.state=state;
-      b.onclick=()=>{
-        const change={storeId:select.value,state};
-        if(!change.storeId){info.textContent="Önce Trendyol restoranını seçin.";return}
-        if(state==="BUSY"){
-          const range=prompt("Normal teslimat aralığı kaç dakika? Örneğin 25-35. Yoğun modda her iki süreye 10 dakika eklenir.");
-          if(!range)return;
-          const match=range.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
-          if(!match){info.textContent="Dakika aralığını 25-35 biçiminde girin.";return}
-          change.min=Number(match[1]);change.max=Number(match[2]);
-        }
-        refresh(change);
-      };
-      buttons.push(b);dialog.querySelector(".ty-actions").append(b);
+    async function refresh(){
+      if(refreshing)return;refreshing=true;refreshButton.disabled=true;
+      try{const data=await request("status");render(data);remaining=30;countdown.textContent=remaining+" sn"}
+      catch(error){info.textContent=error.message}
+      finally{refreshing=false;refreshButton.disabled=false}
     }
-    select.onchange=()=>refresh();refresh();
+    async function changeState(supplierId,storeId,state){
+      let change={supplierId,storeId,state};
+      if(state==="BUSY"){
+        const range=prompt("Normal teslimat aralığı kaç dakika? Örneğin 25-35. Yoğun modda her iki süreye 10 dakika eklenir.");if(!range)return;
+        const match=range.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);if(!match){info.textContent="Dakika aralığını 25-35 biçiminde girin.";return}change.min=Number(match[1]);change.max=Number(match[2]);
+      }
+      info.textContent="Trendyol durumu güncelleniyor…";
+      try{await request("status",change);await refresh()}
+      catch(error){info.textContent=error.message}
+    }
+    refreshButton.onclick=refresh;
+    dialog.querySelector("#easyTyChangeToggle").onclick=()=>{manage.hidden=!manage.hidden};
+    manage.onclick=event=>{
+      const target=event.target.closest("[data-ty-change],[data-ty-state],[data-ty-bulk],[data-ys-change],[data-ys-bulk]");if(!target)return;
+      if(target.hasAttribute("data-ys-change")||target.hasAttribute("data-ys-bulk")){info.textContent="Yemeksepeti şube durum API bağlantısı yapılandırılmamış; bu işlem platformda değişiklik yapmadı.";return}
+      if(target.hasAttribute("data-ty-change")){const key=target.dataset.tyChange;manage.querySelector('[data-ty-choices="'+CSS.escape(key)+'"]').hidden=false;return}
+      if(target.hasAttribute("data-ty-state")){const [supplierId,storeId]=target.closest(".easy-integration-row").querySelector("[data-ty-change]").dataset.tyChange.split("|");changeState(supplierId,storeId,target.dataset.tyState);return}
+      if(target.hasAttribute("data-ty-bulk")){
+        const supplierId=target.dataset.tyBulk,rows=(latest?.accounts||[]).find(account=>account.supplierId===supplierId)?.stores||[],eligible=rows.filter(row=>row.configured&&row.id),desired=eligible.some(row=>row.state!=="OPEN")?"OPEN":"CLOSED";
+        if(!eligible.length){info.textContent="Bu satıcı hesabında yapılandırılmış aktif şube yok.";return}
+        (async()=>{for(const row of eligible){try{await request("status",{supplierId,storeId:row.id,state:desired})}catch(error){info.textContent=error.message;break}}await refresh()})();
+      }
+    };
+    refresh();const timer=setInterval(()=>{if(!dialog.isConnected){clearInterval(timer);return}remaining--;countdown.textContent=Math.max(0,remaining)+" sn";if(remaining<=0)refresh()},1000);
   }
+
   setInterval(function(){
     const anchor=Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("Yeni paket siparişi"));
     if(!anchor||document.getElementById("easyTySyncBtn"))return;
     const btn=document.createElement("button");btn.id="easyTySyncBtn";btn.textContent="🟠 Trendyol Çek";btn.onclick=()=>sync(btn,true);
-    const status=document.createElement("button");status.textContent="Platform durumu";status.onclick=panel;
+    const status=document.createElement("button");status.textContent="Entegrasyon Durumları";status.onclick=panel;
     anchor.before(status,btn);
   },600);
   setInterval(()=>{
